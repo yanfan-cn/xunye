@@ -325,9 +325,10 @@ private fun MarkdownParagraph(
     val colorScheme = LegadoTheme.colorScheme
     val textStyle = LocalTextStyle.current
 
+    // SPEC-261: fixed paragraph gap (was 1em — looked uneven next to lists/headings).
     FlowRow(
         modifier = modifier.then(
-            if (node.nextSibling() != null) Modifier.padding(bottom = with(LocalDensity.current) { LocalTextStyle.current.fontSize.toDp() })
+            if (node.nextSibling() != null) Modifier.padding(bottom = 8.dp)
             else Modifier
         )
     ) {

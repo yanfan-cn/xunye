@@ -51,6 +51,17 @@ sealed interface AiMessagePart {
         val intro: String? = null
     ) : AiMessagePart
 
+    /** SPEC-262: per-reply token usage (API or estimated). */
+    @Keep
+    @Serializable
+    @SerialName("usage")
+    data class Usage(
+        val promptTokens: Int,
+        val completionTokens: Int,
+        val totalTokens: Int,
+        val estimated: Boolean = false,
+    ) : AiMessagePart
+
     // ---- Legacy parts (deprecated, kept for backward-compatible deserialization) ----
 
     @Deprecated("Use Tool instead — tool call and result are now a single part")
@@ -162,6 +173,9 @@ fun List<AiMessagePart>.reasoningContent(): String? {
 fun List<AiMessagePart>.toolParts(): List<AiMessagePart.Tool> {
     return filterIsInstance<AiMessagePart.Tool>()
 }
+
+fun List<AiMessagePart>.usagePart(): AiMessagePart.Usage? =
+    filterIsInstance<AiMessagePart.Usage>().lastOrNull()
 
 /** Returns tool calls that are pending approval (output is empty, state is PENDING). */
 fun List<AiMessagePart>.pendingToolCalls(): List<AiMessagePart.Tool> {

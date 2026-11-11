@@ -104,7 +104,9 @@ class OpenAiChatHandler : AiProtocolHandler {
         val body = mutableMapOf<String, Any?>(
             "model" to request.model.modelId,
             "messages" to request.messages.toOpenAiChatMessages(),
-            "stream" to true
+            "stream" to true,
+            // SPEC-262: ask providers that support it to include usage on the final chunk.
+            "stream_options" to mapOf("include_usage" to true),
         )
         request.tools.takeIf { it.isNotEmpty() }?.let { body["tools"] = it.toOpenAiChatTools() }
         params.temperature?.let { body["temperature"] = it }
@@ -160,6 +162,20 @@ class OpenAiChatHandler : AiProtocolHandler {
                                 rawType = toolCall.type ?: "tool_call"
                             )
                         )
+                    }
+                    chunk?.usage?.let { usage ->
+                        val prompt = usage.prompt_tokens ?: 0
+                        val completion = usage.completion_tokens ?: 0
+                        val total = usage.total_tokens ?: (prompt + completion)
+                        if (prompt > 0 || completion > 0 || total > 0) {
+                            emitEvent(
+                                AiStreamEvent.Usage(
+                                    promptTokens = prompt,
+                                    completionTokens = completion,
+                                    totalTokens = total,
+                                )
+                            )
+                        }
                     }
                 }.getOrElse {
                     throw Exception("Invalid OpenAI chat stream chunk", it)
@@ -337,7 +353,15 @@ internal data class OpenAiModelItem(
 
 @Keep
 internal data class OpenAiChatStreamChunk(
-    val choices: List<OpenAiChatStreamChoice>?
+    val choices: List<OpenAiChatStreamChoice>?,
+    val usage: OpenAiChatUsage?,
+)
+
+@Keep
+internal data class OpenAiChatUsage(
+    val prompt_tokens: Int?,
+    val completion_tokens: Int?,
+    val total_tokens: Int?,
 )
 
 @Keep

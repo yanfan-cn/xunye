@@ -124,6 +124,10 @@ data object MainRouteSettingsAiSummary : MainRoute
 @Serializable
 data object MainRouteSettingsAiPrompt : MainRoute
 
+/** SPEC-262 */
+@Serializable
+data object MainRouteSettingsAiUsage : MainRoute
+
 @Serializable
 data object MainRouteSettingsCustomTheme : MainRoute
 
@@ -272,6 +276,7 @@ object MainRouteConst {
     const val ROUTE_SETTINGS_AI = "settings/ai"
     const val ROUTE_SETTINGS_AI_SUMMARY = "settings/ai/summary"
     const val ROUTE_SETTINGS_AI_PROMPT = "settings/ai/prompt"
+    const val ROUTE_SETTINGS_AI_USAGE = "settings/ai/usage"
     const val ROUTE_AI_CHAT = "ai/chat"
     const val ROUTE_SETTINGS_CUSTOM_THEME = "settings/custom_theme"
     const val ROUTE_SETTINGS_PRIVATE = "settings/private"

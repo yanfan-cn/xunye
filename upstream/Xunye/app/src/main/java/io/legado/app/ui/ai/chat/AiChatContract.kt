@@ -14,7 +14,15 @@ data class AiChatUiState(
     val reasoningLevel: AiReasoningLevel = AiReasoningLevel.AUTO,
     val isSending: Boolean = false,
     val streamingMessage: AiChatMessageUi? = null,
-    val pendingToolConfirmation: AiToolConfirmationUi? = null
+    val pendingToolConfirmation: AiToolConfirmationUi? = null,
+    /** SPEC-250: 是否已配置可用于对话的默认模型。 */
+    val isModelConfigured: Boolean = true,
+    /** SPEC-250: 未配置模型时的引导对话框。 */
+    val showMissingModelPrompt: Boolean = false,
+    /** SPEC-262: model picker sheet. */
+    val showModelPicker: Boolean = false,
+    val availableModels: ImmutableList<AiChatModelOptionUi> = persistentListOf(),
+    val currentModelProfileId: String? = null,
 )
 
 @Stable
@@ -40,7 +48,9 @@ data class AiChatMessageUi(
     val bookResults: ImmutableList<AiChatBookResultUi> = persistentListOf(),
     val branchIndex: Int = 0,
     val totalBranches: Int = 1,
-    val parentMessageId: String? = null
+    val parentMessageId: String? = null,
+    /** SPEC-262 */
+    val tokenUsage: AiChatTokenUsageUi? = null,
 )
 
 @Stable
@@ -53,6 +63,22 @@ data class AiChatBookResultUi(
     val latestChapterTitle: String?,
     val currentChapterTitle: String?,
     val intro: String?
+)
+
+@Stable
+data class AiChatModelOptionUi(
+    val modelProfileId: String,
+    val providerName: String,
+    val modelName: String,
+    val isSelected: Boolean,
+)
+
+@Stable
+data class AiChatTokenUsageUi(
+    val promptTokens: Int,
+    val completionTokens: Int,
+    val totalTokens: Int,
+    val estimated: Boolean,
 )
 
 @Stable
@@ -73,8 +99,19 @@ sealed interface AiChatIntent {
     data class SwitchBranch(val messageId: String) : AiChatIntent
     data class DeleteConversation(val id: String) : AiChatIntent
     data class RenameConversation(val id: String, val title: String) : AiChatIntent
+    /** SPEC-250: 关闭未配置模型提示。 */
+    data object DismissMissingModelPrompt : AiChatIntent
+    /** SPEC-250: 从提示跳转 AI 设置。 */
+    data object OpenAiSettings : AiChatIntent
+    /** SPEC-262 */
+    data object OpenModelPicker : AiChatIntent
+    data object DismissModelPicker : AiChatIntent
+    data class SelectModel(val modelProfileId: String) : AiChatIntent
+    data object AddModel : AiChatIntent
 }
 
 sealed interface AiChatEffect {
     data class ShowMessage(val message: String) : AiChatEffect
+    /** SPEC-250: 打开设置族 AI 设置页。 */
+    data object OpenAiSettings : AiChatEffect
 }

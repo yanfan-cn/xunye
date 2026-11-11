@@ -766,7 +766,16 @@ fun MainActivity.mainEntryProvider(
                         coverPath = book.coverPath,
                     )
                 )
-            }
+            },
+            // SPEC-250: 未配置模型 → 独立 SettingsActivity 的 AI 设置页。
+            onOpenAiSettings = {
+                startActivity(
+                    MainIntent.createSettingsIntent(
+                        this@mainEntryProvider,
+                        MainRouteConst.ROUTE_SETTINGS_AI,
+                    )
+                )
+            },
         )
     }
 

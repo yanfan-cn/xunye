@@ -17,6 +17,7 @@ import io.legado.app.ui.widget.components.SplicedColumnGroup
 import io.legado.app.ui.widget.components.settingItem.ClickableSettingItem
 import io.legado.app.ui.widget.components.settingItem.DropdownListSettingItem
 import io.legado.app.ui.widget.components.settingItem.SliderSettingItem
+import io.legado.app.ui.widget.components.settingItem.SwitchSettingItem
 import io.legado.app.ui.widget.components.topbar.GlassMediumFlexibleTopAppBar
 import io.legado.app.ui.widget.components.topbar.GlassTopAppBarDefaults
 import io.legado.app.ui.widget.components.topbar.TopBarNavigationButton
@@ -82,6 +83,22 @@ fun TranslationConfigScreen(
                         displayEntries = TranslationConstants.targetLanguages.map { it.second }.toTypedArray(),
                         entryValues = TranslationConstants.targetLanguages.map { it.first }.toTypedArray(),
                         onValueChange = { onIntent(TranslationConfigIntent.SetTargetLanguage(it)) },
+                    )
+                    SwitchSettingItem(
+                        title = "网页自动翻译",
+                        description = "打开外文网页时自动页内翻译（默认关闭）",
+                        checked = settings.autoTranslateWebpage,
+                        onCheckedChange = {
+                            onIntent(TranslationConfigIntent.SetAutoTranslateWebpage(it))
+                        },
+                    )
+                    SwitchSettingItem(
+                        title = "净读自动翻译",
+                        description = "进入净读时自动翻译全文（默认关闭）",
+                        checked = settings.autoTranslateJingdu,
+                        onCheckedChange = {
+                            onIntent(TranslationConfigIntent.SetAutoTranslateJingdu(it))
+                        },
                     )
                     SliderSettingItem(
                         title = stringResource(R.string.llm_max_chars_per_chunk),

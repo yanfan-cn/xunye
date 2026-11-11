@@ -170,6 +170,7 @@ import io.legado.app.browser.reader.WebMangaImageFilter
 import io.legado.app.browser.reader.WebPageAnalyzeJs
 import io.legado.app.browser.reader.WebPageLangDetect
 import io.legado.app.browser.reader.WebPageLangDetectJs
+import io.legado.app.browser.reader.WebPageInPlaceTranslator
 import io.legado.app.browser.reader.WebPageTranslate
 import io.legado.app.browser.reader.WebTocDiscoverJs
 import io.legado.app.domain.gateway.ThemeSettingsGateway
@@ -248,6 +249,14 @@ data class BrowserSessionActions(
     val openReaderText: () -> Unit = {},
     val openReaderImage: () -> Unit = {},
     val openReaderMixed: () -> Unit = {},
+    /** SPEC-251: in-page translate (tablet omnibox). */
+    val translatePage: () -> Unit = {},
+    /** SPEC-254: tablet omnibox shows translate only when page needs it. */
+    val pageNeedsTranslate: Boolean = false,
+    /** SPEC-262: page currently showing in-page translation (keep omnibox key for restore). */
+    val pageTranslated: Boolean = false,
+    /** SPEC-259: current URL bookmarked (toolbox + tablet omnibox toggle). */
+    val pageBookmarked: Boolean = false,
 )
 
 /**
@@ -307,6 +316,14 @@ fun BrowserSessionScreen(
     var mainFrameLoading by remember { mutableStateOf(false) }
     var hostRef by remember { mutableStateOf<AwContentsHostView?>(null) }
     var clientRef by remember { mutableStateOf<BrowserAwContentsClient?>(null) }
+    // SPEC-259: Compose also re-applies AUTO when system night flips (Activity may not
+    // forward View.onConfigurationChanged to the host in all paths).
+    val systemUiMode = LocalConfiguration.current.uiMode
+    LaunchedEffect(systemUiMode, webDarkMode, hostRef) {
+        if (webDarkMode == BrowserChromePrefs.WEB_DARK_AUTO) {
+            hostRef?.applyWebContentDarkMode(BrowserChromePrefs.WEB_DARK_AUTO)
+        }
+    }
     // SPEC-125: idle omnibox = page title / host; omniboxLabel keeps last typed draft for edit.
     var omniboxLabel by remember {
         mutableStateOf(BrowserOmniboxLabel.resolve(initialOmniboxLabel, initialUrl))
@@ -372,8 +389,17 @@ fun BrowserSessionScreen(
     val floatingChromeTopGap = BrowserUiTokens.FloatingChromeTopGap
     // SPEC-103: web function bar + reader FAB are 48dp (main shell bar stays 64).
     val phoneChromeBarHeight = 48.dp
-    var showTranslatePrompt by remember { mutableStateOf(false) }
-    val translatePromptExtra = if (showTranslatePrompt) 56.dp else 0.dp
+    /** SPEC-254: eligibility for translate entry (no bottom ask bar). */
+    var pageNeedsTranslate by remember { mutableStateOf(false) }
+    /** SPEC-262: in-page translate currently applied (restore path). */
+    var pageTranslated by remember { mutableStateOf(false) }
+    /** SPEC-259: current URL bookmarked for toolbox / tablet omnibox. */
+    var pageBookmarked by remember { mutableStateOf(false) }
+    var bookmarkEpoch by remember { mutableIntStateOf(0) }
+    /** SPEC-259: in-page translate progress capsule (same chrome as 净读加载). */
+    var translating by remember { mutableStateOf(false) }
+    var translateJob by remember { mutableStateOf<Job?>(null) }
+    val translatePromptExtra = 0.dp
     val floatingChromeReserve =
         floatingChromeTopGap + phoneChromeBarHeight +
             floatingBottomPad + translatePromptExtra
@@ -400,7 +426,6 @@ fun BrowserSessionScreen(
         }
         // SPEC-168: landscape phone chrome is the top bar. Keep only the gesture inset.
         !tabletEmbedded -> navBottom
-        showTranslatePrompt -> 72.dp
         else -> 0.dp
     }
 
@@ -429,9 +454,8 @@ fun BrowserSessionScreen(
     var showModePicker by remember { mutableStateOf(false) }
     var pendingAnalyze by remember { mutableStateOf<WebMangaBookFactory.AnalyzeResult?>(null) }
     var autoOpenedForUrl by remember { mutableStateOf<String?>(null) }
-    /** SPEC-045: translate prompt above browser chrome (state declared earlier for inset). */
-    var translatePromptUrl by remember { mutableStateOf<String?>(null) }
-    var dismissedTranslateUrls by remember { mutableStateOf(setOf<String>()) }
+    /** SPEC-254: remember last URL we evaluated for translate eligibility. */
+    var translateDetectUrl by remember { mutableStateOf<String?>(null) }
     var langDetectJob by remember { mutableStateOf<Job?>(null) }
     /** SPEC-066: transient download banner above bottom chrome (~5s). */
     var downloadBanner by remember { mutableStateOf<String?>(null) }
@@ -533,6 +557,47 @@ fun BrowserSessionScreen(
         extractJob = null
         extracting = false
         readerStatus = null
+    }
+
+    fun currentHttpUrl(): String? {
+        val fromClient = clientRef?.lastUrl?.takeIf { it.startsWith("http") }
+        if (!fromClient.isNullOrBlank()) return fromClient
+        return address.text.takeIf { it.startsWith("http") }
+    }
+
+    fun refreshPageBookmarked(url: String? = currentHttpUrl()) {
+        pageBookmarked = !url.isNullOrBlank() && store.isBookmarked(url)
+    }
+
+    fun toggleBookmark() {
+        val url = currentHttpUrl()
+        if (url.isNullOrBlank()) {
+            context.toastOnUi("当前没有可收藏的链接")
+            return
+        }
+        if (store.isBookmarked(url)) {
+            store.removeBookmark(url)
+            context.toastOnUi("已移出收藏")
+        } else {
+            store.addBookmark(url, clientRef?.lastTitle.orEmpty())
+            context.toastOnUi(context.getString(R.string.browser_favorite_added))
+        }
+        bookmarkEpoch += 1
+        refreshPageBookmarked(url)
+    }
+
+    fun cancelTranslate() {
+        translateJob?.cancel()
+        translateJob = null
+        translating = false
+        val host = hostRef
+        if (host != null) {
+            scope.launch {
+                runCatching {
+                    host.evalJs(io.legado.app.browser.reader.WebPageInPlaceTranslateJs.RESTORE)
+                }
+            }
+        }
     }
 
     fun startExtract(block: suspend () -> Unit) {
@@ -675,8 +740,9 @@ fun BrowserSessionScreen(
             ?: extracted?.title.orEmpty().ifBlank { "网页正文" }
         val series = toc?.seriesUrl?.takeIf { it.isNotBlank() && toc.chapters.size >= 2 }
             ?: pageUrl
+        // SPEC-251: 净读自动翻译以翻译设置为准（默认关）。
         val enableTranslate = forceTranslate
-            ?: BrowserReaderPrefs(context).autoTranslateOnOpen
+            ?: GlobalContext.get().get<TranslationSettingsGateway>().currentSettings.autoTranslateJingdu
         val book = withContext(Dispatchers.IO) {
             val created = WebArticleBookFactory.createEphemeralBook(
                 context,
@@ -699,21 +765,72 @@ fun BrowserSessionScreen(
         open(book.bookUrl)
     }
 
-    fun maybeDetectTranslatePrompt(url: String) {
-        // SPEC-085: hide webpage translate prompt until in-page translate is ready.
+    /** SPEC-251/259: Chrome-like in-page translate / restore (capsule, cancellable). */
+    fun runInPageTranslate(forceTranslate: Boolean = false) {
+        val host = hostRef
+        if (host == null) {
+            context.toastOnUi("页面未就绪")
+            return
+        }
+        val pageUrl = clientRef?.lastUrl.orEmpty().ifBlank { address.text }
+        if (!pageUrl.startsWith("http")) {
+            context.toastOnUi("无法翻译当前页")
+            return
+        }
+        if (WebPageTranslate.isTranslateServiceUrl(pageUrl)) {
+            context.toastOnUi("当前已是翻译服务页")
+            return
+        }
+        if (translating) {
+            cancelTranslate()
+            return
+        }
+        translateJob?.cancel()
+        translateJob = scope.launch {
+            translating = true
+            try {
+                val result = if (forceTranslate) {
+                    WebPageInPlaceTranslator.translate(host) { }
+                } else {
+                    WebPageInPlaceTranslator.toggle(host) { }
+                }
+                // SPEC-262: keep omnibox/toolbox restore entry after translate.
+                pageTranslated = result.translated
+                context.toastOnUi(result.message)
+            } catch (e: CancellationException) {
+                throw e
+            } finally {
+                translating = false
+                translateJob = null
+            }
+        }
+    }
+
+    fun openTranslationSettings() {
+        context.startActivity(
+            io.legado.app.ui.main.MainIntent.createSettingsIntent(
+                context,
+                io.legado.app.ui.main.MainRouteConst.ROUTE_SETTINGS_TRANSLATION,
+            ),
+        )
+    }
+
+    /** SPEC-254: detect need-to-translate; never show bottom ask bar. */
+    fun maybeDetectTranslateNeed(url: String) {
         if (!WebPageTranslate.WEB_PAGE_TRANSLATE_UI_ENABLED) {
-            showTranslatePrompt = false
-            translatePromptUrl = null
+            pageNeedsTranslate = false
             return
         }
-        if (incognito) return
-        if (!url.startsWith("http")) return
+        if (incognito) {
+            pageNeedsTranslate = false
+            return
+        }
+        if (!url.startsWith("http")) {
+            pageNeedsTranslate = false
+            return
+        }
         if (WebPageTranslate.isTranslateServiceUrl(url)) {
-            showTranslatePrompt = false
-            return
-        }
-        if (url in dismissedTranslateUrls) {
-            showTranslatePrompt = false
+            pageNeedsTranslate = false
             return
         }
         langDetectJob?.cancel()
@@ -724,48 +841,16 @@ fun BrowserSessionScreen(
             if (current != url) return@launch
             val raw = host.evalJs(WebPageLangDetectJs.SCRIPT)
             val sample = WebPageLangDetect.parse(raw) ?: return@launch
-            if (!WebPageLangDetect.shouldPrompt(sample.lang, sample.sample)) {
-                showTranslatePrompt = false
-                translatePromptUrl = null
-                return@launch
+            val needs = WebPageLangDetect.shouldPrompt(sample.lang, sample.sample)
+            pageNeedsTranslate = needs
+            translateDetectUrl = url
+            if (!needs) return@launch
+            val auto = GlobalContext.get().get<TranslationSettingsGateway>()
+                .currentSettings.autoTranslateWebpage
+            if (auto) {
+                runInPageTranslate(forceTranslate = true)
             }
-            showTranslatePrompt = true
-            translatePromptUrl = url
         }
-    }
-
-    fun dismissTranslatePrompt() {
-        val u = translatePromptUrl ?: clientRef?.lastUrl.orEmpty().ifBlank { address.text }
-        if (u.isNotBlank()) {
-            dismissedTranslateUrls = dismissedTranslateUrls + u
-        }
-        showTranslatePrompt = false
-        translatePromptUrl = null
-    }
-
-    fun acceptTranslatePrompt() {
-        val pageUrl = translatePromptUrl
-            ?: clientRef?.lastUrl.orEmpty().ifBlank { address.text }
-        dismissTranslatePrompt()
-        if (!pageUrl.startsWith("http")) {
-            context.toastOnUi("无法翻译当前页")
-            return
-        }
-        // SPEC-047/048: stay in browser; webpage translate by selected provider.
-        val settings = GlobalContext.get().get<TranslationSettingsGateway>().currentSettings
-        val translated = WebPageTranslate.pageTranslateUrl(
-            pageUrl = pageUrl,
-            provider = settings.provider,
-            targetLanguage = settings.targetLanguage,
-        )
-        if (translated.isEmpty()) {
-            context.toastOnUi("无法翻译当前页")
-            return
-        }
-        applyOmniboxLabel("翻译中…")
-        hostRef?.loadUrl(translated)
-        BrowserSessionHolder.markLoaded()
-        onPageMeta?.invoke(translated, "翻译中…")
     }
 
     suspend fun openMangaReader(pageUrl: String, analyze: WebMangaBookFactory.AnalyzeResult) {
@@ -1321,7 +1406,8 @@ fun BrowserSessionScreen(
         host.loadUrl(initialUrl)
     }
 
-    LaunchedEffect(hostRef, onBindActions) {
+    // SPEC-254/259/262: rebind when translate eligibility/active or bookmark flips.
+    LaunchedEffect(hostRef, onBindActions, pageNeedsTranslate, pageTranslated, pageBookmarked) {
         onBindActions?.invoke(
             BrowserSessionActions(
                 goBack = { navigateBackOrHome() },
@@ -1345,16 +1431,7 @@ fun BrowserSessionScreen(
                     clientRef?.lastUrl.orEmpty().ifBlank { address.text }
                 },
                 currentPageTitle = { clientRef?.lastTitle.orEmpty() },
-                addBookmark = {
-                    val url = clientRef?.lastUrl?.takeIf { it.startsWith("http") }
-                        ?: address.text.takeIf { it.startsWith("http") }
-                    if (url.isNullOrBlank()) {
-                        context.toastOnUi("当前没有可收藏的链接")
-                    } else {
-                        store.addBookmark(url, clientRef?.lastTitle.orEmpty())
-                        context.toastOnUi(context.getString(R.string.browser_favorite_added))
-                    }
-                },
+                addBookmark = { toggleBookmark() },
                 copyCurrentUrl = {
                     val currentUrl = clientRef?.lastUrl.orEmpty().ifBlank { address.text }
                     context.sendToClip(currentUrl)
@@ -1395,6 +1472,10 @@ fun BrowserSessionScreen(
                 },
                 applyForcePageZoom = { hostRef?.applyForcePageZoom(it) },
                 applyPrivacySettings = { hostRef?.applyPrivacySettings() },
+                translatePage = { runInPageTranslate(forceTranslate = false) },
+                pageNeedsTranslate = pageNeedsTranslate,
+                pageTranslated = pageTranslated,
+                pageBookmarked = pageBookmarked,
                 readerAutoOpenEnabled = { readerAutoOpen },
                 setReaderAutoOpen = { enabled ->
                     readerAutoOpen = enabled
@@ -1875,7 +1956,8 @@ fun BrowserSessionScreen(
                         onMainFrameLoadStarted = {
                             mainFrameLoading = true
                             progress = 0
-                            showTranslatePrompt = false
+                            pageNeedsTranslate = false
+                            pageTranslated = false
                             langDetectJob?.cancel()
                             // SPEC-135: drop previous site's sniffed video so B does not show A's offer.
                             BrowserVideoOfferBus.clear()
@@ -2085,6 +2167,7 @@ fun BrowserSessionScreen(
                             }
                             syncIdleAddress(title, url)
                             onPageMeta?.invoke(url, title)
+                            refreshPageBookmarked(url)
                             if (!incognito) {
                                 store.addHistory(url, title)
                             }
@@ -2130,12 +2213,13 @@ fun BrowserSessionScreen(
                             hostRef?.let {
                                 io.legado.app.browser.engine.BrowserDiagProbe.run(it, url)
                             }
-                            // SPEC-045: non-Simplified-Chinese → ask translate above chrome.
-                            if (url != translatePromptUrl) {
-                                showTranslatePrompt = false
+                            // SPEC-254/262: detect translate eligibility (no ask bar).
+                            if (url != translateDetectUrl) {
+                                pageNeedsTranslate = false
+                                pageTranslated = false
                             }
                             if (!historyNav) {
-                                maybeDetectTranslatePrompt(url)
+                                maybeDetectTranslateNeed(url)
                             }
                         },
                     )
@@ -2290,13 +2374,6 @@ fun BrowserSessionScreen(
                         .padding(bottom = floatingBottomPad)
                         .padding(top = floatingChromeTopGap),
                 ) {
-                        if (showTranslatePrompt) {
-                            TranslatePromptBar(
-                                onTranslate = { acceptTranslatePrompt() },
-                                onDismiss = { dismissTranslatePrompt() },
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                        }
                         val snackText = chromeSnack
                         if (snackText != null) {
                             ChromeSnackBar(message = snackText)
@@ -2710,10 +2787,10 @@ fun BrowserSessionScreen(
                         }
                     }
                 }
-                // SPEC-045/066/132 tablet: prompts near bottom of content (shell has top chrome only).
+                // SPEC-066/132 tablet: banners near bottom of content (shell has top chrome only).
                 val tabletBanner = downloadBanner
                 val tabletSnack = chromeSnack
-                if (showTranslatePrompt || tabletBanner != null || tabletSnack != null) {
+                if (tabletBanner != null || tabletSnack != null) {
                     Column(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
@@ -2723,15 +2800,6 @@ fun BrowserSessionScreen(
                     ) {
                         if (tabletSnack != null) {
                             ChromeSnackBar(message = tabletSnack)
-                            if (showTranslatePrompt || tabletBanner != null) {
-                                Spacer(modifier = Modifier.height(8.dp))
-                            }
-                        }
-                        if (showTranslatePrompt) {
-                            TranslatePromptBar(
-                                onTranslate = { acceptTranslatePrompt() },
-                                onDismiss = { dismissTranslatePrompt() },
-                            )
                             if (tabletBanner != null) {
                                 Spacer(modifier = Modifier.height(8.dp))
                             }
@@ -2806,14 +2874,21 @@ fun BrowserSessionScreen(
                 }
             }
 
-            if (extracting) {
-                // SPEC-149: 胶囊加载态——无遮罩、不拦截整屏，加载期间网页照常显示/滚动/点击。
+            if (extracting || translating) {
+                // SPEC-149/259: 胶囊加载态——无遮罩；净读「加载中」/ 翻译「翻译中」；点取消可中止。
                 // 宽度 = 屏幕宽 40%；手机在底栏上方 16dp，平板在顶栏下方 16dp。
                 val extractCapsuleWidth = LocalConfiguration.current.screenWidthDp.dp * 0.40f
+                val capsuleLabel = if (translating) "翻译中" else "加载中"
+                val onCapsuleCancel = if (translating) {
+                    { cancelTranslate() }
+                } else {
+                    { cancelExtract() }
+                }
                 if (tabletEmbedded) {
                     // 平板顶栏 = 状态栏 + 标签条 40dp + 功能栏 TopBarHeight（同 TabletBrowserChrome）。
                     ReaderLoadingCapsule(
-                        onCancel = { cancelExtract() },
+                        label = capsuleLabel,
+                        onCancel = onCapsuleCancel,
                         modifier = Modifier
                             .align(Alignment.TopCenter)
                             .padding(
@@ -2826,7 +2901,8 @@ fun BrowserSessionScreen(
                     // SPEC-169: raise above portrait bottom bar; landscape has no function bar.
                     val barLift = if (phoneSplitChrome) phoneChromeBarHeight else 0.dp
                     ReaderLoadingCapsule(
-                        onCancel = { cancelExtract() },
+                        label = capsuleLabel,
+                        onCancel = onCapsuleCancel,
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .padding(bottom = floatingBottomPad + barLift + 16.dp)
@@ -2910,11 +2986,8 @@ fun BrowserSessionScreen(
             onNewIncognitoTab = {
                 BrowserTabManager.openNewTab(url = null, incognito = true, select = true)
             },
-            onAddBookmark = {
-                val url = clientRef?.lastUrl?.takeIf { it.startsWith("http") } ?: address.text
-                store.addBookmark(url, clientRef?.lastTitle.orEmpty())
-                context.toastOnUi(context.getString(R.string.browser_favorite_added))
-            },
+            onAddBookmark = { toggleBookmark() },
+            pageBookmarked = pageBookmarked,
             onSavePage = { saveCurrentPage() },
             onShare = { shareCurrentPage() },
             onCopyLink = {
@@ -2992,6 +3065,9 @@ fun BrowserSessionScreen(
                 browserFullscreen = true
                 phoneChromeVisible = false
             },
+            onTranslatePage = { runInPageTranslate(forceTranslate = false) },
+            onOpenTranslationSettings = { openTranslationSettings() },
+            pageTranslated = pageTranslated,
         ),
     )
 
@@ -3094,40 +3170,6 @@ fun BrowserSessionScreen(
 
 }
 
-@Composable
-private fun TranslatePromptBar(
-    onTranslate: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val scheme = LegadoTheme.colorScheme
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(CardCorner),
-        colors = CardDefaults.cardColors(containerColor = scheme.surfaceContainerHigh),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "翻译此网页？",
-                modifier = Modifier.weight(1f),
-                color = scheme.onSurface,
-                fontSize = 14.sp,
-            )
-            TextButton(onClick = onDismiss) {
-                Text("不")
-            }
-            TextButton(onClick = onTranslate) {
-                Text("翻译")
-            }
-        }
-    }
-}
-
 /** SPEC-094: short status above bottom chrome, 24dp corners. */
 @Composable
 private fun ChromeSnackBar(message: String) {
@@ -3188,11 +3230,13 @@ private fun PhoneWebChromeIcon(
 
 /**
  * SPEC-149: 阅读提取加载胶囊——无遮罩；胶囊本体吞掉点击（不透传网页），取消键可用。
+ * SPEC-259: [label] 净读「加载中」/ 页内翻译「翻译中」。
  */
 @Composable
 private fun ReaderLoadingCapsule(
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
+    label: String = "加载中",
 ) {
     val scheme = LegadoTheme.colorScheme
     Row(
@@ -3200,7 +3244,7 @@ private fun ReaderLoadingCapsule(
             .height(40.dp)
             .clip(ContinuousCapsule)
             .background(scheme.surfaceContainerHigh, ContinuousCapsule)
-            .clickable(onClick = {}),
+            .clickable(onClick = onCancel),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         AppCircularProgressIndicator(
@@ -3210,7 +3254,7 @@ private fun ReaderLoadingCapsule(
             strokeWidth = 2.dp,
         )
         Text(
-            "加载中",
+            label,
             color = scheme.onSurface,
             fontSize = 13.sp,
             maxLines = 1,

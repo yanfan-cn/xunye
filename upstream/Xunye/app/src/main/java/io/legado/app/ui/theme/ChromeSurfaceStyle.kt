@@ -6,7 +6,8 @@ import android.os.Build
  * SPEC-056/061: global chrome surface style for browser / floating bars / reader menus.
  * Stored in ThemeSettings.chromeSurfaceStyle.
  *
- * SPEC-061: Translucent is no longer offered; API &lt; 35 defaults to Filled.
+ * SPEC-061: Translucent is no longer offered.
+ * SPEC-258: default is always Filled (liquid glass opt-in), including API 35+.
  */
 enum class ChromeSurfaceStyle(val storageValue: String) {
     Translucent("translucent"),
@@ -20,8 +21,9 @@ enum class ChromeSurfaceStyle(val storageValue: String) {
 }
 
 object ChromeSurfaceStylePolicy {
+    @Suppress("UNUSED_PARAMETER")
     fun defaultStyle(sdk: Int = Build.VERSION.SDK_INT): ChromeSurfaceStyle =
-        if (sdk >= 35) ChromeSurfaceStyle.LiquidGlass else ChromeSurfaceStyle.Filled
+        ChromeSurfaceStyle.Filled
 
     fun availableStyles(sdk: Int = Build.VERSION.SDK_INT): List<ChromeSurfaceStyle> =
         if (sdk >= Build.VERSION_CODES.TIRAMISU) {

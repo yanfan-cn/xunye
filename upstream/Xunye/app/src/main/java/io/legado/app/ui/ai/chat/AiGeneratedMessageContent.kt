@@ -36,6 +36,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import io.legado.app.R
 import io.legado.app.domain.model.AiMessagePart
 import io.legado.app.ui.theme.LegadoTheme
@@ -52,8 +53,9 @@ fun AiGeneratedMessageContent(
     message: AiChatMessageUi,
     modifier: Modifier = Modifier,
     assistantLabel: String = "",
-    showHeader: Boolean = true,
-    reasoningAutoExpandWhileStreaming: Boolean = true,
+    // SPEC-261: no role/model header; thinking stays collapsed by default.
+    showHeader: Boolean = false,
+    reasoningAutoExpandWhileStreaming: Boolean = false,
     onOpenBookInfo: (AiChatBookResultUi) -> Unit = {},
     onCopy: (() -> Unit)? = null,
     onRegenerate: (() -> Unit)? = null,
@@ -65,10 +67,30 @@ fun AiGeneratedMessageContent(
     val reasoningSteps = groupedParts
         .filterIsInstance<AiMessagePartBlock.ThinkingBlock>()
         .flatMap { block -> block.steps.filterIsInstance<AiThinkingStep.ReasoningStep>() }
-    val toolSteps = groupedParts
-        .filterIsInstance<AiMessagePartBlock.ThinkingBlock>()
-        .flatMap { block -> block.steps.filterIsInstance<AiThinkingStep.ToolStep>() }
     val contentBlocks = groupedParts.filterIsInstance<AiMessagePartBlock.ContentBlock>()
+    val textParts = contentBlocks.mapNotNull { it.part as? AiMessagePart.Text }
+    // SPEC-261: merge all book/web results into one list (no repeated section titles).
+    val mergedResults = remember(message.parts, message.bookResults) {
+        buildList {
+            message.parts.filterIsInstance<AiMessagePart.BookResult>().forEach { part ->
+                add(
+                    AiChatBookResultUi(
+                        bookUrl = part.bookUrl,
+                        name = part.name,
+                        author = part.author,
+                        origin = part.origin,
+                        coverPath = part.coverPath,
+                        latestChapterTitle = part.latestChapterTitle,
+                        currentChapterTitle = part.currentChapterTitle,
+                        intro = part.intro,
+                    )
+                )
+            }
+            addAll(message.bookResults)
+        }.distinctBy { it.bookUrl }
+    }
+    val webResults = mergedResults.filter { it.isBrowserOrigin() }
+    val bookOnlyResults = mergedResults.filterNot { it.isBrowserOrigin() }
 
     Column(
         modifier = modifier.animateContentSize()
@@ -95,52 +117,21 @@ fun AiGeneratedMessageContent(
                 modifier = Modifier.padding(bottom = 8.dp)
             )
         }
-        if (toolSteps.isNotEmpty()) {
-            AiThinkingCard(
-                steps = toolSteps,
-                isStreaming = isStreaming,
-                durationSeconds = message.thinkingDuration,
-                autoExpandWhileStreaming = false,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-        }
-        contentBlocks.forEach { block ->
-            when (val part = block.part) {
-                is AiMessagePart.Text -> {
-                    MessageTextContent(
-                        text = part.text,
-                        isUser = isUser,
-                        isStreaming = isStreaming,
-                    )
-                }
+        // SPEC-261: do not render tool-call cards in the bubble.
 
-                is AiMessagePart.BookResult -> {
-                    BookResultsList(
-                        books = listOf(
-                            AiChatBookResultUi(
-                                bookUrl = part.bookUrl,
-                                name = part.name,
-                                author = part.author,
-                                origin = part.origin,
-                                coverPath = part.coverPath,
-                                latestChapterTitle = part.latestChapterTitle,
-                                currentChapterTitle = part.currentChapterTitle,
-                                intro = part.intro
-                            )
-                        ),
-                        onOpenBookInfo = onOpenBookInfo
-                    )
-                }
-
-                else -> Unit
+        if (textParts.isNotEmpty()) {
+            textParts.forEach { part ->
+                MessageTextContent(
+                    text = part.text,
+                    isUser = isUser,
+                    isStreaming = isStreaming,
+                )
             }
-        }
-
-        if (groupedParts.isEmpty()) {
+        } else {
             val displayReasoning = message.parts.filterIsInstance<AiMessagePart.Reasoning>()
                 .joinToString("\n\n") { it.text }.trim()
                 .takeIf { it.isNotBlank() } ?: message.reasoning
-            if (!displayReasoning.isNullOrBlank()) {
+            if (!displayReasoning.isNullOrBlank() && reasoningSteps.isEmpty()) {
                 AiThinkingCard(
                     steps = listOf(AiThinkingStep.ReasoningStep(displayReasoning)),
                     isStreaming = isStreaming,
@@ -149,26 +140,7 @@ fun AiGeneratedMessageContent(
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
             }
-            val displayToolTrace = message.parts.filterIsInstance<AiMessagePart.Tool>()
-                .joinToString("\n\n") { tool ->
-                    buildString {
-                        append("Tool: "); append(tool.toolName); append('\n')
-                        append("ID: "); append(tool.toolCallId)
-                        tool.input.takeIf { it.isNotBlank() }?.let { append('\n'); append(it) }
-                        tool.output.takeIf { it.isNotBlank() }?.let {
-                            append('\n'); append("Result: "); append(it)
-                        }
-                    }
-                }.takeIf { it.isNotBlank() } ?: message.toolTrace
-            if (!displayToolTrace.isNullOrBlank()) {
-                TracePanel(
-                    title = stringResource(R.string.ai_tool_trace),
-                    content = displayToolTrace
-                )
-            }
-            val displayContent = message.parts.filterIsInstance<AiMessagePart.Text>()
-                .joinToString("\n\n") { it.text }.trim()
-                .ifBlank { message.content }
+            val displayContent = message.content
             if (displayContent.isNotBlank()) {
                 MessageTextContent(
                     text = displayContent,
@@ -178,8 +150,36 @@ fun AiGeneratedMessageContent(
             } else if (isStreaming) {
                 MessageTextContent(text = "", isUser = isUser, isStreaming = true)
             }
-            if (message.bookResults.isNotEmpty()) {
-                BookResultsList(books = message.bookResults, onOpenBookInfo = onOpenBookInfo)
+        }
+
+        if (bookOnlyResults.isNotEmpty()) {
+            RelatedResultsList(
+                title = stringResource(R.string.ai_book_results),
+                books = bookOnlyResults,
+                onOpenBookInfo = onOpenBookInfo,
+            )
+        }
+        if (webResults.isNotEmpty()) {
+            RelatedResultsList(
+                title = stringResource(R.string.ai_web_results),
+                books = webResults,
+                onOpenBookInfo = onOpenBookInfo,
+            )
+        }
+
+        // SPEC-262: token usage under assistant reply.
+        if (isAssistant && !isStreaming) {
+            message.tokenUsage?.let { usage ->
+                Spacer(modifier = Modifier.height(6.dp))
+                AppText(
+                    text = if (usage.estimated) {
+                        stringResource(R.string.ai_tokens_estimated, usage.totalTokens)
+                    } else {
+                        stringResource(R.string.ai_tokens_used, usage.totalTokens)
+                    },
+                    style = LegadoTheme.typography.labelSmall,
+                    color = LegadoTheme.colorScheme.outline,
+                )
             }
         }
 
@@ -243,9 +243,11 @@ private fun MessageTextContent(
                 style = LegadoTheme.typography.bodyLarge
             )
         } else if (text.isNotBlank()) {
+            // SPEC-261: stable lineHeight for assistant markdown.
             MarkdownBlock(
                 content = text,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                style = LegadoTheme.typography.bodyLarge.copy(lineHeight = 1.55.em),
             )
         } else if (isStreaming) {
             StreamingDots()
@@ -254,7 +256,8 @@ private fun MessageTextContent(
 }
 
 @Composable
-private fun BookResultsList(
+private fun RelatedResultsList(
+    title: String,
     books: List<AiChatBookResultUi>,
     onOpenBookInfo: (AiChatBookResultUi) -> Unit
 ) {
@@ -265,7 +268,7 @@ private fun BookResultsList(
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         AppText(
-            text = stringResource(R.string.ai_book_results),
+            text = title,
             style = LegadoTheme.typography.labelMedium,
             color = LegadoTheme.colorScheme.outline
         )
@@ -276,6 +279,14 @@ private fun BookResultsList(
             )
         }
     }
+}
+
+internal fun AiChatBookResultUi.isBrowserOrigin(): Boolean {
+    val o = origin.orEmpty()
+    if (o.equals("浏览器", ignoreCase = true)) return true
+    if (o.contains("browsesth://", ignoreCase = true)) return true
+    if (bookUrl.startsWith("browsesth://", ignoreCase = true)) return true
+    return false
 }
 
 @Composable

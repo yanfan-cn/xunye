@@ -1,8 +1,6 @@
 package io.legado.app.ui.ai.chat
 
-import io.legado.app.ui.widget.components.icon.SymbolIcon
 import io.legado.app.ui.widget.components.icon.Symbols
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
@@ -10,6 +8,9 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import android.content.ClipData
+import android.content.res.Configuration
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -58,14 +60,12 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.onSizeChanged
-import android.content.ClipData
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -74,8 +74,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.legado.app.R
 import io.legado.app.domain.model.AiMessageRole
-import io.legado.app.domain.model.AiReasoningLevel
-import io.legado.app.ui.ai.AiReasoningModeButton
 import io.legado.app.ui.theme.LegadoTheme
 import io.legado.app.ui.widget.components.AppScaffold
 import io.legado.app.ui.widget.components.AppTextField
@@ -99,6 +97,8 @@ import java.util.concurrent.TimeUnit
 fun AiChatRouteScreen(
     onBackClick: () -> Unit,
     onOpenBookInfo: (AiChatBookResultUi) -> Unit,
+    /** SPEC-250: 未配置模型时跳转 AI 设置。 */
+    onOpenAiSettings: () -> Unit = {},
     viewModel: AiChatViewModel = koinViewModel()
 ) {
     AiChatScreen(
@@ -106,7 +106,8 @@ fun AiChatRouteScreen(
         effects = viewModel.effects,
         onIntent = viewModel::onIntent,
         onBackClick = onBackClick,
-        onOpenBookInfo = onOpenBookInfo
+        onOpenBookInfo = onOpenBookInfo,
+        onOpenAiSettings = onOpenAiSettings,
     )
 }
 
@@ -117,7 +118,8 @@ fun AiChatScreen(
     effects: Flow<AiChatEffect>,
     onIntent: (AiChatIntent) -> Unit,
     onBackClick: () -> Unit,
-    onOpenBookInfo: (AiChatBookResultUi) -> Unit
+    onOpenBookInfo: (AiChatBookResultUi) -> Unit,
+    onOpenAiSettings: () -> Unit = {},
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
@@ -139,16 +141,11 @@ fun AiChatScreen(
         ?: stringResource(R.string.ai_chat)
     val modelName = currentConversation?.modelName?.takeIf { it.isNotBlank() }
         ?: stringResource(R.string.ai_select_model)
-    val assistantLabel = when {
-        currentConversation == null -> ""
-        currentConversation.providerName.isNotBlank() &&
-            currentConversation.modelName.isNotBlank() -> {
-            "${currentConversation.providerName} ${currentConversation.modelName}"
-        }
-
-        currentConversation.modelName.isNotBlank() -> currentConversation.modelName
-        else -> ""
-    }
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    // SPEC-262: landscape sidebar pin (true = split, false = fullscreen + drawer).
+    var sidebarPinned by rememberSaveable { mutableStateOf(true) }
+    val showSplitSidebar = isLandscape && sidebarPinned
     val generationGradientProgress = if (state.isSending) {
         val transition = androidx.compose.animation.core.rememberInfiniteTransition(
             label = "AiChatGeneratingGradient"
@@ -184,29 +181,20 @@ fun AiChatScreen(
                         errorDialogMessage = effect.message
                     }
                 }
+                AiChatEffect.OpenAiSettings -> onOpenAiSettings()
             }
         }
     }
 
-    ModalNavigationDrawer(
-        drawerState = drawerState,
-        drawerContent = {
-            RecentChatsDrawer(
-                conversations = state.conversations,
-                onNewChat = {
-                    onIntent(AiChatIntent.NewConversation)
-                    scope.launch { drawerState.close() }
-                },
-                onSelectConversation = {
-                    onIntent(AiChatIntent.SelectConversation(it))
-                    scope.launch { drawerState.close() }
-                },
-                onDeleteConversation = {
-                    onIntent(AiChatIntent.DeleteConversation(it))
-                }
-            )
-        }
-    ) {
+    val onSelectConversation: (String) -> Unit = { id ->
+        onIntent(AiChatIntent.SelectConversation(id))
+        if (!isLandscape) scope.launch { drawerState.close() }
+    }
+    val onDeleteConversation: (String) -> Unit = { id ->
+        onIntent(AiChatIntent.DeleteConversation(id))
+    }
+
+    val chatBody: @Composable () -> Unit = {
         AppScaffold(
             snackbarHost = { SnackbarHost(snackbarHostState) },
             alwaysDrawBehindBars = true,
@@ -263,12 +251,8 @@ fun AiChatScreen(
                     }
             }
 
-            // When streaming message changes, re-evaluate stick
-            LaunchedEffect(state.streamingMessage?.id) {
-                if (shouldStickToBottom || isNearBottom) {
-                    shouldStickToBottom = true
-                }
-            }
+            // SPEC-262: do NOT force stick when a new streaming message starts —
+            // only follow if the user is already near the bottom.
 
             // Auto-scroll: when messages or streaming content changes, scroll to bottom if sticking
             LaunchedEffect(
@@ -276,12 +260,12 @@ fun AiChatScreen(
                 state.messages.size,
                 state.streamingMessage?.content?.length,
                 state.streamingMessage?.reasoning?.length,
-                state.streamingMessage?.toolTrace?.length
             ) {
                 if (shouldStickToBottom && !listState.isScrollInProgress) {
                     val lastIndex = listState.layoutInfo.totalItemsCount - 1
                     if (lastIndex >= 0) {
-                        listState.animateScrollToItem(lastIndex)
+                        // Instant jump while streaming — animate fights user scroll.
+                        listState.scrollToItem(lastIndex)
                     }
                 }
             }
@@ -321,7 +305,6 @@ fun AiChatScreen(
                         ChatMessageItem(
                             message = message,
                             isStreaming = false,
-                            assistantLabel = assistantLabel,
                             onOpenBookInfo = onOpenBookInfo,
                             onCopy = {
                                 scope.launch {
@@ -358,7 +341,6 @@ fun AiChatScreen(
                             ChatMessageItem(
                                 message = streaming,
                                 isStreaming = true,
-                                assistantLabel = assistantLabel,
                                 onOpenBookInfo = onOpenBookInfo,
                                 onCopy = {}
                             )
@@ -462,7 +444,6 @@ fun AiChatScreen(
                             ChatInputBar(
                                 value = draft,
                                 isSending = state.isSending,
-                                reasoningLevel = state.reasoningLevel,
                                 onValueChange = { draft = it },
                                 onSend = {
                                     val text = draft
@@ -470,9 +451,6 @@ fun AiChatScreen(
                                     onIntent(AiChatIntent.SendMessage(text))
                                 },
                                 onStop = { onIntent(AiChatIntent.StopGenerating) },
-                                onUpdateReasoningLevel = {
-                                    onIntent(AiChatIntent.UpdateReasoningLevel(it))
-                                }
                             )
                         }
                     }
@@ -507,59 +485,108 @@ fun AiChatScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // SPEC-262: Menu always available — landscape toggles pin vs fullscreen.
                         MediumTonalButton(
-                            onClick = onBackClick,
-                            icon = Symbols.KeyboardArrowLeft,
-                            contentDescription = stringResource(R.string.back),
+                            onClick = {
+                                if (isLandscape) {
+                                    sidebarPinned = !sidebarPinned
+                                } else {
+                                    scope.launch { drawerState.open() }
+                                }
+                            },
+                            icon = Symbols.Menu,
+                            contentDescription = stringResource(R.string.ai_recent_chats)
                         )
                         Box(
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(50))
+                                .background(LegadoTheme.colorScheme.surfaceContainerLow)
+                                .clickable { onIntent(AiChatIntent.OpenModelPicker) }
+                                .padding(horizontal = 12.dp, vertical = 4.dp)
+                                .heightIn(min = 40.dp),
                             contentAlignment = Alignment.CenterStart
                         ) {
-                            Surface(
-                                modifier = Modifier.height(40.dp),
-                                shape = RoundedCornerShape(50),
-                                color = LegadoTheme.colorScheme.surfaceContainerLow
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.Center
                             ) {
-                                Column(
-                                    modifier = Modifier
-                                        .height(40.dp)
-                                        .padding(horizontal = 12.dp),
-                                    horizontalAlignment = Alignment.Start,
-                                    verticalArrangement = Arrangement.Center
-                                ) {
-                                    AppText(
-                                        text = conversationTitle,
-                                        style = LegadoTheme.typography.labelMediumEmphasized,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    AppText(
-                                        text = modelName,
-                                        style = LegadoTheme.typography.labelSmall,
-                                        color = LegadoTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
+                                AppText(
+                                    text = conversationTitle,
+                                    style = LegadoTheme.typography.labelMediumEmphasized,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                AppText(
+                                    text = modelName,
+                                    style = LegadoTheme.typography.labelSmall,
+                                    color = LegadoTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             MediumTonalButton(
-                                onClick = { scope.launch { drawerState.open() } },
-                                icon = Symbols.Menu,
-                                contentDescription = stringResource(R.string.ai_recent_chats)
-                            )
-                            MediumTonalButton(
                                 onClick = { onIntent(AiChatIntent.NewConversation) },
                                 icon = Symbols.Add,
                                 contentDescription = stringResource(R.string.ai_new_chat)
+                            )
+                            MediumTonalButton(
+                                onClick = onBackClick,
+                                icon = Symbols.Close,
+                                contentDescription = stringResource(R.string.ai_close_assistant)
                             )
                         }
                     }
                 }
             }
         }
+    }
+
+    if (showSplitSidebar) {
+        Row(modifier = Modifier.fillMaxSize()) {
+            ConversationPane(
+                conversations = state.conversations,
+                onSelectConversation = onSelectConversation,
+                onDeleteConversation = onDeleteConversation,
+                modifier = Modifier
+                    .weight(0.30f)
+                    .fillMaxHeight(),
+                asDrawerSheet = false,
+            )
+            Box(
+                modifier = Modifier
+                    .weight(0.70f)
+                    .fillMaxHeight()
+            ) {
+                chatBody()
+            }
+        }
+    } else {
+        ModalNavigationDrawer(
+            drawerState = drawerState,
+            drawerContent = {
+                ConversationPane(
+                    conversations = state.conversations,
+                    onSelectConversation = onSelectConversation,
+                    onDeleteConversation = onDeleteConversation,
+                    modifier = Modifier.width(280.dp),
+                    asDrawerSheet = true,
+                )
+            },
+        ) {
+            chatBody()
+        }
+    }
+
+    if (state.showModelPicker) {
+        AiModelPickerSheet(
+            models = state.availableModels,
+            onSelect = { onIntent(AiChatIntent.SelectModel(it)) },
+            onAddModel = { onIntent(AiChatIntent.AddModel) },
+            onDismiss = { onIntent(AiChatIntent.DismissModelPicker) },
+        )
     }
 
     AppAlertDialog(
@@ -569,6 +596,18 @@ fun AiChatScreen(
         text = errorDialogMessage,
         confirmText = stringResource(R.string.ok),
         onConfirm = { errorDialogMessage = null }
+    )
+
+    // SPEC-250: 未配置模型时提示，并可跳转 AI 设置。
+    AppAlertDialog(
+        show = state.showMissingModelPrompt,
+        onDismissRequest = { onIntent(AiChatIntent.DismissMissingModelPrompt) },
+        title = stringResource(R.string.ai_model_not_configured),
+        text = stringResource(R.string.ai_chat_model_required),
+        confirmText = stringResource(R.string.ai_config),
+        onConfirm = { onIntent(AiChatIntent.OpenAiSettings) },
+        dismissText = stringResource(R.string.cancel),
+        onDismiss = { onIntent(AiChatIntent.DismissMissingModelPrompt) },
     )
 }
 
@@ -621,17 +660,17 @@ private fun PendingToolConfirmationCard(
     }
 }
 
+/** SPEC-261: conversation list — search always visible; no sidebar top bar. */
 @Composable
-private fun RecentChatsDrawer(
+private fun ConversationPane(
     conversations: List<AiChatConversationUi>,
-    onNewChat: () -> Unit,
     onSelectConversation: (String) -> Unit,
-    onDeleteConversation: (String) -> Unit
+    onDeleteConversation: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    asDrawerSheet: Boolean = true,
 ) {
     var searchQuery by rememberSaveable { mutableStateOf("") }
-    var showSearch by rememberSaveable { mutableStateOf(false) }
     var conversationToDelete by remember { mutableStateOf<AiChatConversationUi?>(null) }
-    val searchFocusRequester = remember { FocusRequester() }
     val filteredConversations = remember(conversations, searchQuery) {
         if (searchQuery.isBlank()) {
             conversations
@@ -642,102 +681,77 @@ private fun RecentChatsDrawer(
         }
     }
 
-    LaunchedEffect(showSearch) {
-        if (showSearch) {
-            searchFocusRequester.requestFocus()
-        }
-    }
-
-    ModalDrawerSheet(
-        modifier = Modifier.width(280.dp),
-        drawerContainerColor = LegadoTheme.colorScheme.surfaceContainerLow
-    ) {
-        Row(
+    val content: @Composable () -> Unit = {
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .fillMaxSize()
+                .statusBarsPadding()
+                .padding(top = 8.dp)
         ) {
-            AppText(
-                text = stringResource(R.string.ai_recent_chats),
-                style = LegadoTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            MediumTonalButton(
-                onClick = {
-                    showSearch = !showSearch
-                    if (!showSearch) {
-                        searchQuery = ""
-                    }
-                },
-                icon = Symbols.Search,
-                selected = showSearch,
-                contentDescription = stringResource(R.string.search)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            MediumTonalButton(
-                onClick = onNewChat,
-                icon = Symbols.Add,
-                contentDescription = stringResource(R.string.ai_new_chat)
-            )
-        }
-        AnimatedVisibility(visible = showSearch) {
-            AppTextField(
+            // SPEC-262: same capsule search as bookmarks/favorites.
+            io.legado.app.ui.browser.BrowserListSearchField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 4.dp)
-                    .focusRequester(searchFocusRequester),
-                backgroundColor = LegadoTheme.colorScheme.surface,
-                label = stringResource(R.string.search),
-                singleLine = true
+                placeholder = stringResource(R.string.search),
             )
-        }
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            items(filteredConversations, key = { it.id }) { conversation ->
-                val isSelected = conversation.isSelected
-                NormalCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = { onSelectConversation(conversation.id) },
-                    onLongClick = { conversationToDelete = conversation },
-                    containerColor = if (isSelected) {
-                        LegadoTheme.colorScheme.primaryContainer
-                    } else {
-                        LegadoTheme.colorScheme.surface
-                    }
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 10.dp)
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                items(filteredConversations, key = { it.id }) { conversation ->
+                    val isSelected = conversation.isSelected
+                    NormalCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { onSelectConversation(conversation.id) },
+                        onLongClick = { conversationToDelete = conversation },
+                        containerColor = if (isSelected) {
+                            LegadoTheme.colorScheme.primaryContainer
+                        } else {
+                            LegadoTheme.colorScheme.surface
+                        }
                     ) {
-                        AppText(
-                            text = conversation.title,
-                            style = LegadoTheme.typography.bodyMedium,
-                            maxLines = 2,
-                            color = if (isSelected) {
-                                LegadoTheme.colorScheme.onPrimaryContainer
-                            } else {
-                                LegadoTheme.colorScheme.onSurface
-                            }
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        AppText(
-                            text = formatRelativeTime(conversation.updatedAt),
-                            style = LegadoTheme.typography.labelSmall,
-                            color = LegadoTheme.colorScheme.outline
-                        )
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp)
+                        ) {
+                            AppText(
+                                text = conversation.title,
+                                style = LegadoTheme.typography.bodyMedium,
+                                maxLines = 2,
+                                color = if (isSelected) {
+                                    LegadoTheme.colorScheme.onPrimaryContainer
+                                } else {
+                                    LegadoTheme.colorScheme.onSurface
+                                }
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            AppText(
+                                text = formatRelativeTime(conversation.updatedAt),
+                                style = LegadoTheme.typography.labelSmall,
+                                color = LegadoTheme.colorScheme.outline
+                            )
+                        }
                     }
                 }
             }
+        }
+    }
+
+    if (asDrawerSheet) {
+        ModalDrawerSheet(
+            modifier = modifier,
+            drawerContainerColor = LegadoTheme.colorScheme.surfaceContainerLow
+        ) {
+            content()
+        }
+    } else {
+        Surface(
+            modifier = modifier,
+            color = LegadoTheme.colorScheme.surfaceContainerLow
+        ) {
+            content()
         }
     }
 
@@ -779,7 +793,6 @@ private fun formatRelativeTime(timestamp: Long): String {
 private fun ChatMessageItem(
     message: AiChatMessageUi,
     isStreaming: Boolean,
-    assistantLabel: String = "",
     onOpenBookInfo: (AiChatBookResultUi) -> Unit,
     onCopy: () -> Unit,
     onRegenerate: (() -> Unit)? = null,
@@ -815,7 +828,6 @@ private fun ChatMessageItem(
                 isAssistant = isAssistant,
                 isStreaming = isStreaming,
                 message = message,
-                assistantLabel = assistantLabel,
                 onOpenBookInfo = onOpenBookInfo,
                 onCopy = onCopy,
                 onRegenerate = onRegenerate,
@@ -832,11 +844,9 @@ private fun ChatMessageItem(
 private fun ChatInputBar(
     value: String,
     isSending: Boolean,
-    reasoningLevel: AiReasoningLevel,
     onValueChange: (String) -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
-    onUpdateReasoningLevel: (AiReasoningLevel) -> Unit
 ) {
     val isKeyboardVisible =
         WindowInsets.ime.asPaddingValues().calculateBottomPadding() > 0.dp
@@ -870,13 +880,7 @@ private fun ChatInputBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            // Thinking mode button
-            AiReasoningModeButton(
-                level = reasoningLevel,
-                enabled = !isSending,
-                onLevelChange = onUpdateReasoningLevel,
-            )
-
+            // SPEC-260: chat thinking fixed to AUTO — no multi-level picker.
             // Text field
             BasicTextField(
                 value = value,
@@ -917,7 +921,7 @@ private fun ChatInputBar(
             } else {
                 MediumTonalButton(
                     onClick = onSend,
-                    icon = Symbols.Send,
+                    icon = Symbols.ArrowUpward,
                     enabled = value.isNotBlank(),
                     contentDescription = stringResource(R.string.ai_send)
                 )
@@ -945,12 +949,72 @@ private fun EmptyChatHint() {
 @Composable
 private fun AiChatEffectHandler(
     effects: Flow<AiChatEffect>,
-    snackbarHostState: SnackbarHostState
+    snackbarHostState: SnackbarHostState,
+    onOpenAiSettings: () -> Unit = {},
 ) {
     LaunchedEffect(Unit) {
         effects.collectLatest { effect ->
             when (effect) {
                 is AiChatEffect.ShowMessage -> snackbarHostState.showSnackbar(effect.message)
+                AiChatEffect.OpenAiSettings -> onOpenAiSettings()
+            }
+        }
+    }
+}
+
+@Composable
+private fun AiModelPickerSheet(
+    models: List<AiChatModelOptionUi>,
+    onSelect: (String) -> Unit,
+    onAddModel: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    io.legado.app.ui.widget.components.modalBottomSheet.AppModalBottomSheet(
+        show = true,
+        onDismissRequest = onDismiss,
+        title = stringResource(R.string.ai_select_model),
+    ) {
+        LazyColumn {
+            items(models, key = { it.modelProfileId }) { model ->
+                NormalCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    onClick = { onSelect(model.modelProfileId) },
+                    containerColor = if (model.isSelected) {
+                        LegadoTheme.colorScheme.primaryContainer
+                    } else {
+                        LegadoTheme.colorScheme.surface
+                    },
+                ) {
+                    AppText(
+                        text = model.modelName,
+                        style = LegadoTheme.typography.bodyMedium,
+                        fontWeight = if (model.isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                        modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp),
+                    )
+                    if (model.providerName.isNotBlank()) {
+                        AppText(
+                            text = model.providerName,
+                            style = LegadoTheme.typography.labelSmall,
+                            color = LegadoTheme.colorScheme.outline,
+                            modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                        )
+                    } else {
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
+                }
+            }
+            item {
+                MediumTonalButton(
+                    onClick = onAddModel,
+                    icon = Symbols.Add,
+                    text = stringResource(R.string.ai_add_model),
+                    contentDescription = stringResource(R.string.ai_add_model),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                )
             }
         }
     }

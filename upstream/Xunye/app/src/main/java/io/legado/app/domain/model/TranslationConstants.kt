@@ -5,11 +5,13 @@ object TranslationConstants {
     const val PROVIDER_OPENAI = "openai"
     const val PROVIDER_APP_AI = "app_ai"
     const val PROVIDER_GOOGLE = "google"
-    /** SPEC-048: Baidu Translate (mainland-friendly). */
+    /** SPEC-251: Mozilla Bergamot via Foxlet (default). */
+    const val PROVIDER_BERGAMOT = "bergamot"
+    /** @deprecated SPEC-249/251 removed from product UI; migrate to [PROVIDER_BERGAMOT]. */
     const val PROVIDER_BAIDU = "baidu"
-    /** SPEC-171: Google ML Kit on-device (optional; needs GMS / Google network). */
+    /** @deprecated SPEC-249/251 removed from product UI; migrate to [PROVIDER_BERGAMOT]. */
     const val PROVIDER_MLKIT = "mlkit"
-    /** Reserved; not exposed in UI yet (SPEC-048 deferred). */
+    /** Reserved; not exposed in UI. */
     const val PROVIDER_MICROSOFT = "microsoft"
 
     const val MIN_TEMPERATURE = 0f
@@ -17,14 +19,12 @@ object TranslationConstants {
     const val DEFAULT_TEMPERATURE = 0.7f
 
     val providerDisplayNames = listOf(
-        "百度翻译",
-        "端上翻译 (ML Kit)",
+        "Bergamot（本机）",
         "应用 AI 接口",
         "Google Translate",
     )
     val providerValues = listOf(
-        PROVIDER_BAIDU,
-        PROVIDER_MLKIT,
+        PROVIDER_BERGAMOT,
         PROVIDER_APP_AI,
         PROVIDER_GOOGLE,
     )

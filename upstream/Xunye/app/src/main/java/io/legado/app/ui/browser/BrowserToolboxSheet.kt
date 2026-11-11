@@ -90,6 +90,8 @@ data class BrowserToolboxActions(
     val onOpenSettings: () -> Unit,
     val onNewIncognitoTab: () -> Unit,
     val onAddBookmark: () -> Unit,
+    /** SPEC-259: current page already in bookmarks → show 移出收藏. */
+    val pageBookmarked: Boolean = false,
     val onSavePage: () -> Unit,
     val onShare: () -> Unit,
     val onCopyLink: () -> Unit,
@@ -112,6 +114,11 @@ data class BrowserToolboxActions(
     val onOpenVideoCapsule: () -> Unit = {},
     /** SPEC-242: hide browser chrome; restore FAB uses CloseFullscreen. */
     val onEnterFullscreen: () -> Unit = {},
+    /** SPEC-251: in-page translate toggle / open translation settings. */
+    val onTranslatePage: () -> Unit = {},
+    val onOpenTranslationSettings: () -> Unit = {},
+    /** SPEC-262: page currently translated → toolbox label「恢复原文」. */
+    val pageTranslated: Boolean = false,
 )
 
 private data class ToolboxGridDef(
@@ -548,6 +555,7 @@ fun BrowserToolboxBody(
                         iconFilled = when (def.id) {
                             "eye_protection" -> actions.eyeProtectionEnabled
                             "video_capsule" -> actions.videoCapsuleAvailable
+                            "add_bookmark" -> actions.pageBookmarked
                             else -> false
                         },
                         onClick = {
@@ -587,6 +595,10 @@ fun BrowserToolboxBody(
                                     onDismiss()
                                     actions.onFindInPage()
                                 }
+                                "translate" -> {
+                                    onDismiss()
+                                    actions.onTranslatePage()
+                                }
                                 "video_capsule" -> {
                                     onDismiss()
                                     actions.onOpenVideoCapsule()
@@ -602,6 +614,12 @@ fun BrowserToolboxBody(
                                 {
                                     onDismiss()
                                     actions.onOpenEyeProtectionSettings()
+                                }
+                            }
+                            "translate" -> {
+                                {
+                                    onDismiss()
+                                    actions.onOpenTranslationSettings()
                                 }
                             }
                             else -> null
@@ -625,7 +643,11 @@ fun BrowserToolboxBody(
 
 private fun gridDef(id: String, actions: BrowserToolboxActions): ToolboxGridDef? = when (id) {
     "new_incognito" -> ToolboxGridDef(id, "新建无痕", Symbols.VisibilityOff)
-    "add_bookmark" -> ToolboxGridDef(id, "加入收藏", Symbols.BookmarkAdd)
+    "add_bookmark" -> ToolboxGridDef(
+        id,
+        if (actions.pageBookmarked) "移出收藏" else "加入收藏",
+        if (actions.pageBookmarked) Symbols.BookmarkRemove else Symbols.BookmarkAdd,
+    )
     "save_page" -> ToolboxGridDef(id, "保存网页", Symbols.DownloadForOffline)
     "share" -> ToolboxGridDef(id, "转发网页", Symbols.Share)
     "copy_link" -> ToolboxGridDef(id, "复制链接", Symbols.ContentCopy)
@@ -656,6 +678,11 @@ private fun gridDef(id: String, actions: BrowserToolboxActions): ToolboxGridDef?
         Symbols.FormatSize,
     )
     "find_in_page" -> ToolboxGridDef(id, "页内查找", Symbols.Search)
+    "translate" -> ToolboxGridDef(
+        id,
+        if (actions.pageTranslated) "恢复原文" else "翻译",
+        Symbols.Translate,
+    )
     "fullscreen" -> ToolboxGridDef(id, "全屏", Symbols.OpenInFull)
     else -> null
 }

@@ -56,7 +56,8 @@ class AiChatGenerationUseCase(
         toolTrace: ToolTraceBuilder,
         onContent: suspend (String) -> Unit,
         onReasoning: suspend (String) -> Unit,
-        onToolTraceUpdate: suspend () -> Unit
+        onToolTraceUpdate: suspend () -> Unit,
+        onUsage: suspend (AiStreamEvent.Usage) -> Unit = {},
     ) {
         toolTrace.beginResponse()
         aiTextGateway.generateStream(request).collect { event ->
@@ -67,6 +68,7 @@ class AiChatGenerationUseCase(
                     toolTrace.append(event)
                     onToolTraceUpdate()
                 }
+                is AiStreamEvent.Usage -> onUsage(event)
             }
         }
     }
@@ -108,13 +110,15 @@ class AiChatGenerationUseCase(
     fun buildAssistantParts(
         text: String,
         reasoning: String,
-        toolTrace: ToolTraceBuilder
+        toolTrace: ToolTraceBuilder,
+        usage: AiMessagePart.Usage? = null,
     ): List<AiMessagePart> {
         return buildList {
             reasoning.takeIf { it.isNotBlank() }?.let { add(AiMessagePart.Reasoning(it)) }
             text.takeIf { it.isNotBlank() }?.let { add(AiMessagePart.Text(it)) }
             addAll(toolTrace.toParts())
             addAll(toolTrace.bookResults())
+            usage?.let { add(it) }
         }
     }
 

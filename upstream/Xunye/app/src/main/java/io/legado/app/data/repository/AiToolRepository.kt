@@ -771,6 +771,8 @@ class AiToolRepository(
 
     private fun Book.toSummaryMap(): Map<String, Any?> {
         return toIdentityMap() + mapOf(
+            // SPEC-261: origin lets UI label browser books as「相关网页」.
+            "origin" to origin,
             "originName" to originName,
             "currentChapterIndex" to durChapterIndex,
             "currentChapterTitle" to durChapterTitle,

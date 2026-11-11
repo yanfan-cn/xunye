@@ -9,8 +9,12 @@ import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import android.content.res.Configuration
 import androidx.activity.compose.BackHandler
@@ -94,6 +98,8 @@ fun BrowserHomeTabScreen(
     onOpenReadingBookmark: (Book) -> Unit = {},
     onOpenBookshelf: () -> Unit = {},
     onOpenMy: () -> Unit = {},
+    /** SPEC-250: NTP「AI 助手」→ 现有 AI 对话。 */
+    onOpenAiChat: () -> Unit = {},
     /** SPEC-183: shared-element scopes for the reading-list card covers. */
     sharedTransitionScope: SharedTransitionScope? = null,
     animatedVisibilityScope: AnimatedVisibilityScope? = null,
@@ -114,6 +120,7 @@ fun BrowserHomeTabScreen(
             onOpenReadingBookmark = onOpenReadingBookmark,
             onOpenBookshelf = onOpenBookshelf,
             onOpenMy = onOpenMy,
+            onOpenAiChat = onOpenAiChat,
             sharedTransitionScope = sharedTransitionScope,
             animatedVisibilityScope = animatedVisibilityScope,
         )
@@ -136,6 +143,7 @@ private fun BrowserHomeTabBody(
     onOpenReadingBookmark: (Book) -> Unit,
     onOpenBookshelf: () -> Unit,
     onOpenMy: () -> Unit,
+    onOpenAiChat: () -> Unit,
     sharedTransitionScope: SharedTransitionScope? = null,
     animatedVisibilityScope: AnimatedVisibilityScope? = null,
 ) {
@@ -279,6 +287,7 @@ private fun BrowserHomeTabBody(
             onOpenTabs = onOpenTabs,
             onOpenReader = onOpenReader,
             onOpenMangaReader = onOpenMangaReader,
+            onOpenAiChat = onOpenAiChat,
             sessionKey = active?.id,
             onSessionExitFinished = onSessionExitFinished,
             onPhoneSearchActiveChange = onPhoneSearchActiveChange,
@@ -410,6 +419,7 @@ private fun BrowserHomeTabBody(
                     onOpenHistory = { sidePanel = TabletSidePanel.History },
                     onOpenBookmarks = { sidePanel = TabletSidePanel.Bookmarks },
                     onOpenTabs = { sidePanel = TabletSidePanel.Tabs },
+                    onOpenAiChat = onOpenAiChat,
                     tabletLayout = true,
                     sharedTransitionScope = sharedTransitionScope,
                     animatedVisibilityScope = animatedVisibilityScope,
@@ -495,16 +505,39 @@ private fun BrowserHomeTabBody(
                 )
             }
         }
+        // SPEC-257: tablet 净读 enter/exit — slide-up like phone Activity feel (no hard cut).
         val overlayUrl = embeddedReaderUrl
-        if (embeddedKind != null && !overlayUrl.isNullOrBlank()) {
-            // Key by tab+url so switching tabs remounts the correct reader (SPEC-208).
-            androidx.compose.runtime.key(active?.id, overlayUrl, embeddedKind) {
-                TabletEmbeddedReaderHost(
-                    kind = embeddedKind,
-                    bookUrl = overlayUrl,
-                    onClose = { closeEmbeddedReader() },
-                    modifier = Modifier.fillMaxSize(),
-                )
+        val showEmbeddedReader = embeddedKind != null && !overlayUrl.isNullOrBlank()
+        var exitKind by remember { mutableStateOf<TabletEmbeddedReaderKind?>(null) }
+        var exitUrl by remember { mutableStateOf<String?>(null) }
+        if (embeddedKind != null) exitKind = embeddedKind
+        if (!overlayUrl.isNullOrBlank()) exitUrl = overlayUrl
+        AnimatedVisibility(
+            visible = showEmbeddedReader,
+            modifier = Modifier
+                .fillMaxSize()
+                .zIndex(2f),
+            enter = slideInVertically(
+                animationSpec = tween(280, easing = FastOutSlowInEasing),
+                initialOffsetY = { it / 5 },
+            ) + fadeIn(animationSpec = tween(180)),
+            exit = slideOutVertically(
+                animationSpec = tween(220, easing = FastOutSlowInEasing),
+                targetOffsetY = { it / 6 },
+            ) + fadeOut(animationSpec = tween(160)),
+        ) {
+            val kind = exitKind
+            val url = exitUrl
+            if (kind != null && !url.isNullOrBlank()) {
+                // Key by tab+url so switching tabs remounts the correct reader (SPEC-208).
+                androidx.compose.runtime.key(active?.id, url, kind) {
+                    TabletEmbeddedReaderHost(
+                        kind = kind,
+                        bookUrl = url,
+                        onClose = { closeEmbeddedReader() },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
         }
@@ -585,6 +618,7 @@ private fun PhoneBrowserHome(
     onOpenTabs: () -> Unit,
     onOpenReader: (bookUrl: String) -> Unit,
     onOpenMangaReader: (bookUrl: String) -> Unit,
+    onOpenAiChat: () -> Unit = {},
     sessionKey: String?,
     onSessionExitFinished: () -> Unit,
     onPhoneSearchActiveChange: (Boolean) -> Unit,
@@ -619,6 +653,7 @@ private fun PhoneBrowserHome(
                     onOpenHistory = onOpenHistory,
                     onOpenBookmarks = onOpenBookmarks,
                     onOpenTabs = openTabs,
+                    onOpenAiChat = onOpenAiChat,
                     tabletLayout = false,
                     onPhoneSearchActiveChange = onPhoneSearchActiveChange,
                     sharedTransitionScope = sharedTransitionScope,

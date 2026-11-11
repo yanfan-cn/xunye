@@ -100,7 +100,25 @@ class BrowserVideoPlaybackService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
+        // SPEC-254: after startForegroundService the platform requires startForeground
+        // within a few seconds — promote first, before ExoPlayer / early returns / stop.
+        val action = intent?.action
+        val pendingTitle = intent?.getStringExtra(EXTRA_TITLE).orEmpty().ifBlank {
+            when (action) {
+                ACTION_START_AUDIO -> "音频播放中"
+                ACTION_START_PAGE -> BrowserWebMediaBridge.title.ifBlank { "视频播放中" }
+                else -> titleText.ifBlank { "视频播放中" }
+            }
+        }
+        startAsForeground(
+            playing = when (action) {
+                ACTION_PAUSE, ACTION_STOP -> false
+                ACTION_START_PAGE -> BrowserWebMediaBridge.isPlaying()
+                else -> true
+            },
+            title = pendingTitle,
+        )
+        when (action) {
             ACTION_STOP -> {
                 BrowserVideoPlayerBridge.pause()
                 releaseAudioPlayer()
@@ -132,6 +150,7 @@ class BrowserVideoPlaybackService : Service() {
             }
             ACTION_START_AUDIO -> {
                 val offer = readOffer(intent) ?: run {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf()
                     return START_NOT_STICKY
                 }
@@ -139,8 +158,8 @@ class BrowserVideoPlaybackService : Service() {
                 audioOnly = true
                 pageMedia = false
                 audioOnlyActive = true
-                startAudioPlayer(offer)
                 startAsForeground(playing = true, title = titleText)
+                startAudioPlayer(offer)
                 scheduleTicks()
                 return START_STICKY
             }
@@ -148,9 +167,7 @@ class BrowserVideoPlaybackService : Service() {
                 audioOnly = false
                 pageMedia = true
                 audioOnlyActive = false
-                titleText = intent?.getStringExtra(EXTRA_TITLE).orEmpty().ifBlank {
-                    BrowserWebMediaBridge.title.ifBlank { "视频播放中" }
-                }
+                titleText = pendingTitle
                 startAsForeground(playing = BrowserWebMediaBridge.isPlaying(), title = titleText)
                 scheduleTicks()
                 return START_STICKY
@@ -159,7 +176,7 @@ class BrowserVideoPlaybackService : Service() {
                 audioOnly = false
                 pageMedia = false
                 audioOnlyActive = false
-                titleText = intent?.getStringExtra(EXTRA_TITLE).orEmpty().ifBlank { "视频播放中" }
+                titleText = pendingTitle
                 startAsForeground(playing = true, title = titleText)
                 scheduleTicks()
                 return START_STICKY
@@ -432,9 +449,27 @@ class BrowserVideoPlaybackService : Service() {
             }
         }
 
+        /**
+         * SPEC-254: do not [Context.stopService] while a pending
+         * [Context.startForegroundService] may not have promoted yet — that races into
+         * ForegroundServiceDidNotStartInTimeException. Route stop through onStartCommand.
+         */
         fun stop(context: Context) {
             audioOnlyActive = false
-            context.stopService(Intent(context, BrowserVideoPlaybackService::class.java))
+            val intent = Intent(context, BrowserVideoPlaybackService::class.java)
+                .setAction(ACTION_STOP)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                runCatching { context.startForegroundService(intent) }
+                    .onFailure {
+                        runCatching {
+                            context.stopService(
+                                Intent(context, BrowserVideoPlaybackService::class.java),
+                            )
+                        }
+                    }
+            } else {
+                context.startService(intent)
+            }
         }
 
         private fun readOffer(intent: Intent?): BrowserVideoOffer? {

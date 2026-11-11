@@ -145,6 +145,7 @@ class IdentifyBookCharactersUseCase(
                 is io.legado.app.domain.gateway.AiStreamEvent.ToolCallDelta -> {
                     event.name?.takeIf(String::isNotBlank)?.let { emit(Progress.ToolCall(it)) }
                 }
+                is io.legado.app.domain.gateway.AiStreamEvent.Usage -> Unit
             }
         }
         val jsonStart = response.indexOf('{')

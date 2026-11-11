@@ -346,6 +346,10 @@ open class MainActivity : BaseComposeActivity(), AudioPlay.CallBack,
         window.decorView.post {
             runCatching { io.legado.app.api.ShortCuts.buildShortCuts(applicationContext) }
                 .onFailure { android.util.Log.e("ShortCuts", "register", it) }
+            // SPEC-257: warm Chromium after first frame so restore attach is cheaper.
+            runCatching {
+                io.legado.app.browser.engine.BrowserSessionHolder.warm(applicationContext)
+            }
         }
         MainShortcutBus.consumeIntentExtras(intent)
 
@@ -658,6 +662,7 @@ open class MainActivity : BaseComposeActivity(), AudioPlay.CallBack,
                     is MainRouteSettingsAi -> MainRouteConst.ROUTE_SETTINGS_AI
                     is MainRouteSettingsAiSummary -> MainRouteConst.ROUTE_SETTINGS_AI_SUMMARY
                     is MainRouteSettingsAiPrompt -> MainRouteConst.ROUTE_SETTINGS_AI_PROMPT
+                    is MainRouteSettingsAiUsage -> MainRouteConst.ROUTE_SETTINGS_AI_USAGE
                     is MainRouteSettingsDownloadCache -> MainRouteConst.ROUTE_SETTINGS_DOWNLOAD_CACHE
                     is MainRouteSettingsTranslation -> MainRouteConst.ROUTE_SETTINGS_TRANSLATION
                     is MainRouteSettingsPrivate -> MainRouteConst.ROUTE_SETTINGS_PRIVATE

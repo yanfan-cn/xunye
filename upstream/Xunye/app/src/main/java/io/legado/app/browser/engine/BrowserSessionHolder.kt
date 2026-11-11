@@ -5,6 +5,7 @@ import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Keeps Aloha hosts alive across Compose dispose and tab switches (SPEC-011/012/120).
@@ -40,6 +41,15 @@ object BrowserSessionHolder {
      */
     @Volatile
     var clearHistoryAfterNtpExit: Boolean = false
+
+    /** SPEC-257: sessionKey → URL to load as soon as the host is created (cold restore). */
+    private val eagerLoadUrls = ConcurrentHashMap<String, String>()
+
+    /** SPEC-257: queue restore URL so [attachTo] can start network before Compose settles. */
+    fun queueEagerLoad(sessionKey: String, url: String) {
+        if (sessionKey.isBlank() || url.isBlank()) return
+        eagerLoadUrls[sessionKey] = url
+    }
 
     fun attachTo(
         container: FrameLayout,
@@ -108,7 +118,16 @@ object BrowserSessionHolder {
         val newClient = clientFactory()
         newHost.attach(newClient, incognito = incognito)
         container.addView(newHost)
-        active = SessionSlot(newHost, newClient, hasLoadedInitialUrl = false)
+        // SPEC-257: start restore navigation immediately after attach (before Compose chrome).
+        val eager = eagerLoadUrls.remove(sessionKey)
+        var loaded = false
+        if (!eager.isNullOrBlank()) {
+            newClient.lastUrl = eager
+            runCatching { newHost.loadUrl(eager) }
+            loaded = true
+            Log.i(TAG, "eager loadUrl key=$sessionKey url=$eager")
+        }
+        active = SessionSlot(newHost, newClient, hasLoadedInitialUrl = loaded)
         this.sessionKey = sessionKey
         Log.i(TAG, "created session host key=$sessionKey")
         Log.i(
@@ -286,6 +305,19 @@ object BrowserSessionHolder {
         (slot.host.parent as? ViewGroup)?.removeView(slot.host)
     }
 
-    @Suppress("UNUSED_PARAMETER")
-    fun warm(context: Context) = Unit
+    /**
+     * SPEC-257: touch Aloha/Chromium once so the first real session attach is cheaper.
+     * Safe no-op if engine is already up.
+     */
+    fun warm(context: Context) {
+        runCatching {
+            val app = context.applicationContext
+            val host = AwContentsHostView(app)
+            val client = BrowserAwContentsClient()
+            host.attach(client, incognito = false)
+            host.onHostPause()
+            host.destroyContents()
+            Log.i(TAG, "warm engine done")
+        }.onFailure { Log.w(TAG, "warm engine: ${it.message}") }
+    }
 }

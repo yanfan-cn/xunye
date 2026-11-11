@@ -257,6 +257,7 @@ class CleanSelectedTextUseCase(
                 }
 
                 is AiStreamEvent.ToolCallDelta -> Unit
+                is AiStreamEvent.Usage -> Unit
             }
         }
 

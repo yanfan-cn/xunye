@@ -464,7 +464,17 @@ object PreferKey {
     const val llmRetryCount = "llmRetryCount"
     const val llmTemperature = "llmTemperature"
     const val llmPrompt = "llmPrompt"
+    /** SPEC-251: webpage / 净读 auto-translate toggles. */
+    const val autoTranslateWebpage = "autoTranslateWebpage"
+    const val autoTranslateJingdu = "autoTranslateJingdu"
     const val aiRewritePresets = "aiRewritePresets"
+    /** SPEC-262: AI chat open restores last conversation (default false → new chat). */
+    const val aiRestoreLastChat = "aiRestoreLastChat"
+    const val aiUsagePromptTokens = "aiUsagePromptTokens"
+    const val aiUsageCompletionTokens = "aiUsageCompletionTokens"
+    const val aiUsageRequestCount = "aiUsageRequestCount"
+    const val aiUsageEstimatedCount = "aiUsageEstimatedCount"
+    const val aiUsageUpdatedAt = "aiUsageUpdatedAt"
 
     const val navIconHome = "navIconHome"
 

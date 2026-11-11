@@ -301,6 +301,7 @@ class GenerateChapterSummaryUseCase(
                 }
 
                 is AiStreamEvent.ToolCallDelta -> Unit
+                is AiStreamEvent.Usage -> Unit
             }
         }
     }

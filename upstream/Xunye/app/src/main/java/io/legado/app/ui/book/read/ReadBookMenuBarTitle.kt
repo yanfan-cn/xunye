@@ -92,8 +92,11 @@ internal fun MenuTitleBar(
     // SPEC-061: filled chrome → opaque solid top bar (not transparent).
     val forceFilledChrome =
         io.legado.app.ui.theme.ChromeSurfaceStylePolicy.isFilledActive(chromeSurfaceStyle)
+    // SPEC-257: liquid glass — no full-width tinted strip; only back / title / more chips.
+    val liquidChrome =
+        io.legado.app.ui.theme.ChromeSurfaceStylePolicy.isLiquidGlassActive(chromeSurfaceStyle)
     // SPEC-209: fill mode uses same floating layout as liquid glass — no full-width strip.
-    val topBarSurfaceAlpha = if (forceFilledChrome) {
+    val topBarSurfaceAlpha = if (forceFilledChrome || liquidChrome) {
         0
     } else {
         io.legado.app.ui.theme.ChromeSurfaceStylePolicy.effectiveReadMenuSurfaceAlpha(
@@ -103,7 +106,7 @@ internal fun MenuTitleBar(
     }
     val dragTopBarAlpha = topBarSurfaceAlpha.coerceAtMost(30)
     val animatedTopBarAlpha by animateFloatAsState(
-        targetValue = if (isSliderDragging && !forceFilledChrome) {
+        targetValue = if (isSliderDragging && !forceFilledChrome && !liquidChrome) {
             dragTopBarAlpha.toFloat()
         } else {
             topBarSurfaceAlpha.toFloat()
@@ -113,7 +116,8 @@ internal fun MenuTitleBar(
     )
     val topBarAlpha = animatedTopBarAlpha / 100f
     val useTopBarBlur =
-        !forceFilledChrome && readMenuTopBarHazeEnabled(hazeState, state.menuConfig)
+        !forceFilledChrome && !liquidChrome &&
+            readMenuTopBarHazeEnabled(hazeState, state.menuConfig)
     val topBarVisualState = ReaderMenuVisualState(
         effect = if (useTopBarBlur) ReaderMenuEffect.Haze else ReaderMenuEffect.None,
         tintStyle = state.menuConfig.readMenuTopBarBlurStyle.toReaderMenuTintStyle(),

@@ -10,7 +10,8 @@ interface AiChatGateway {
     fun observeMessages(conversationId: String): Flow<List<AiChatMessage>>
     fun observeSelectedMessages(conversationId: String): Flow<List<AiChatMessage>>
     suspend fun getConversation(id: String): AiChatConversation?
-    suspend fun createConversation(title: String = "New Chat"): AiChatConversation
+    /** SPEC-261: default title is「新对话」(not "New Chat"). */
+    suspend fun createConversation(title: String = "新对话"): AiChatConversation
     suspend fun saveMessage(
         conversationId: String,
         role: String,

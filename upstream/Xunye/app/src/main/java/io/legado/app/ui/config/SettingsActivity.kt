@@ -55,6 +55,7 @@ import io.legado.app.ui.main.MainRouteSettingsAiModelEdit
 import io.legado.app.ui.main.MainRouteSettingsAiProviderEdit
 import io.legado.app.ui.main.MainRouteSettingsAiPrompt
 import io.legado.app.ui.main.MainRouteSettingsAiSummary
+import io.legado.app.ui.main.MainRouteSettingsAiUsage
 import io.legado.app.ui.main.MainRouteSettingsBackup
 import io.legado.app.ui.main.MainRouteSettingsBrowser
 import io.legado.app.ui.main.MainRouteSettingsCover
@@ -164,6 +165,7 @@ class SettingsActivity : BaseComposeActivity() {
             is MainRouteSettingsAi,
             is MainRouteSettingsAiSummary,
             is MainRouteSettingsAiPrompt,
+            is MainRouteSettingsAiUsage,
             is MainRouteSettingsDownloadCache,
             is MainRouteSettingsTranslation,
             is MainRouteSettingsPrivate -> resolved
@@ -201,6 +203,7 @@ private fun settingsFamilyEntryProvider(
                 onNavigateToTranslation = { backStack.add(MainRouteSettingsTranslation) },
                 onNavigateToAiSummary = { backStack.add(MainRouteSettingsAiSummary) },
                 onNavigateToAiPrompt = { backStack.add(MainRouteSettingsAiPrompt) },
+                onNavigateToAiUsage = { backStack.add(MainRouteSettingsAiUsage) },
                 onNavigateToAiFromTranslation = { backStack.add(MainRouteSettingsAi) },
                 onOpenClearBrowsingData = { backStack.add(MainRouteBrowserClearData) },
                 onOpenBrowserPrivacy = { backStack.add(MainRouteBrowserPrivacy) },
@@ -301,6 +304,7 @@ private fun settingsFamilyEntryProvider(
             onNavigateToTranslation = { backStack.add(MainRouteSettingsTranslation) },
             onNavigateToAiSummary = { backStack.add(MainRouteSettingsAiSummary) },
             onNavigateToAiPrompt = { backStack.add(MainRouteSettingsAiPrompt) },
+            onNavigateToAiUsage = { backStack.add(MainRouteSettingsAiUsage) },
         )
     }
 
@@ -310,6 +314,10 @@ private fun settingsFamilyEntryProvider(
 
     entry<MainRouteSettingsAiPrompt>(metadata = settingsSharedAxisMetadata()) {
         AiPromptConfigRouteScreen(onBackClick = onNavigateBack)
+    }
+
+    entry<MainRouteSettingsAiUsage>(metadata = settingsSharedAxisMetadata()) {
+        io.legado.app.ui.config.ai.AiUsageRouteScreen(onBackClick = onNavigateBack)
     }
 
     entry<MainRouteSettingsAiProviderEdit>(metadata = settingsSharedAxisMetadata()) { route ->

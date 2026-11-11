@@ -12,6 +12,9 @@ sealed interface TranslationConfigIntent {
     data class SetProvider(val value: String) : TranslationConfigIntent
     data class SetTargetLanguage(val value: String) : TranslationConfigIntent
     data class SetMaxCharsPerChunk(val value: Int) : TranslationConfigIntent
+    /** SPEC-251 */
+    data class SetAutoTranslateWebpage(val value: Boolean) : TranslationConfigIntent
+    data class SetAutoTranslateJingdu(val value: Boolean) : TranslationConfigIntent
 }
 
 sealed interface TranslationConfigEffect

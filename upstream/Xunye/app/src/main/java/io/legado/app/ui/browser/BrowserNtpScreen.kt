@@ -220,6 +220,8 @@ fun BrowserNtpScreen(
     onOpenHistory: () -> Unit = {},
     onOpenBookmarks: () -> Unit = {},
     onOpenTabs: () -> Unit = {},
+    /** SPEC-250: NTP「AI 助手」→ 现有 AI 对话页。 */
+    onOpenAiChat: () -> Unit = {},
     rootModifier: Modifier = Modifier,
     /** SPEC-018/040: tablet NTP layout (55% width, wallpaper, no corner chrome). */
     tabletLayout: Boolean = false,
@@ -1010,7 +1012,7 @@ fun BrowserNtpScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         NtpActionChip(
-                            label = "AI 模式",
+                            label = stringResource(R.string.ai_chat),
                             icon = {
                                 SymbolIcon(
                                     Symbols.AutoAwesome,
@@ -1021,7 +1023,7 @@ fun BrowserNtpScreen(
                             },
                             fg = textColor,
                             bg = Color.Transparent,
-                            onClick = { context.toastOnUi("AI 模式即将推出") },
+                            onClick = onOpenAiChat,
                         )
                         NtpActionChip(
                             label = if (incognito) "退出无痕" else "无痕浏览",

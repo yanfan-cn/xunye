@@ -544,11 +544,14 @@ fun MainScreen(
             Box(
                 modifier = Modifier.fillMaxSize()
             ) {
+                // SPEC-257: disable haze/backdrop sampling while the main pager is
+                // scrolling into 「我的」/阅读列表 — liquid glass + swipe was the jank source.
+                val pagerSettled = !pagerState.isScrollInProgress
                 Box(
                     modifier = Modifier.then(
                         // SPEC-009/021: never sample browser Home (NTP or session) —
                         // haze/layerBackdrop + pager swipe = jank; Chromium sample = blank.
-                        if (useLiquidGlass && !onBrowserHome) {
+                        if (useLiquidGlass && !onBrowserHome && pagerSettled) {
                             Modifier
                                 .hazeSource(hazeState)
                                 .layerBackdrop(floatingBarBackdrop)
@@ -640,6 +643,7 @@ fun MainScreen(
                                         }
                                     }
                                 },
+                                onOpenAiChat = onNavigateToChat,
                             )
 
                             MainDestination.Bookshelf -> BookshelfRouteScreen(

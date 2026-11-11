@@ -38,10 +38,12 @@ import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import io.legado.app.browser.engine.BrowserSessionHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -98,6 +100,11 @@ private fun BrowserTabsBody(
     val thumbRev by BrowserTabThumbnailStore.revision.collectAsStateWithLifecycle()
     val activeIncognito = tabs.firstOrNull { it.id == activeId }?.incognito == true
     var showIncognito by remember { mutableStateOf(activeIncognito) }
+    // SPEC-257: capture active tab when opening the grid; warm disk thumbs into memory.
+    LaunchedEffect(Unit) {
+        BrowserTabThumbnailStore.preloadFromDisk(tabs.map { it.id })
+        BrowserSessionHolder.captureActiveThumbnail()
+    }
 
     val normalCount = tabs.count { !it.incognito }
     val incognitoCount = tabs.count { it.incognito }

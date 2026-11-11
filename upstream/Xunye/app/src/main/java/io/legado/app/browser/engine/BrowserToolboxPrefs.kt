@@ -32,6 +32,8 @@ class BrowserToolboxPrefs(context: Context) {
         val DEFAULT_ORDER = listOf(
             "new_incognito",
             "add_bookmark",
+            // SPEC-251: in-page webpage translate.
+            "translate",
             "save_page",
             "share",
             "copy_link",

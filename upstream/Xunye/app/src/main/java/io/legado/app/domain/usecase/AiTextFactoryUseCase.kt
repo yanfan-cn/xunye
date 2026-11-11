@@ -383,6 +383,7 @@ class AiTextFactoryUseCase(
                 }
 
                 is AiStreamEvent.ToolCallDelta -> Unit
+                is AiStreamEvent.Usage -> Unit
             }
         }
     }

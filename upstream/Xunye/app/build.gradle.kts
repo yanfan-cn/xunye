@@ -119,7 +119,8 @@ android {
 
     defaultConfig {
     applicationId = "com.xunye.app"
-        minSdk = 26
+        // SPEC-251: Foxlet/Bergamot AAR requires API 28+.
+        minSdk = 28
         targetSdk = 37
         versionCode = versionCodeValue
         versionName = System.getenv("APP_VERSION_NAME") ?: projectVersionName
@@ -342,6 +343,8 @@ dependencies {
     implementation(files("cronetlib/cronet_api.jar"))
     // SPEC-222: Aloha Core only on default `aloha` flavor (not systemWv).
     "alohaImplementation"(files("libs/aloha-bromium-localbuild.aar"))
+    // SPEC-251: Mozilla Bergamot via Foxlet (arm64 AAR; models downloaded on demand).
+    implementation(files("libs/foxlet-v0.5.0.aar"))
     implementation("com.google.guava:guava:33.3.1-android")
     // Cimoc A adapters (SPEC-016)
     implementation("com.alibaba:fastjson:1.2.83")

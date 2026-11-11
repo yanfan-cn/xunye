@@ -743,19 +743,14 @@ private fun TabletToolboxFloatingCard(
     val solidToolbox = TabletBrowserLayout.tabletToolboxUsesSolidSurfaces(
         currentChromeSurfaceStyle(),
     )
+    // SPEC-257: align with bookmarks/history side drawer (full-width slide, no short /4 hop).
     AnimatedVisibility(
         visible = visible,
         modifier = Modifier
             .fillMaxSize()
             .padding(top = 16.dp + extraTopPadding, end = 16.dp),
-        enter = slideInHorizontally(
-            animationSpec = tween(220),
-            initialOffsetX = { it / 4 },
-        ),
-        exit = slideOutHorizontally(
-            animationSpec = tween(180),
-            targetOffsetX = { it / 4 },
-        ),
+        enter = slideInHorizontally { it },
+        exit = slideOutHorizontally { it },
     ) {
         Box(
             modifier = Modifier.fillMaxSize(),
@@ -815,6 +810,7 @@ private fun TabletToolboxFloatingCard(
                             sessionActions?.addBookmark()
                                 ?: context.toastOnUi("请先打开网页")
                         },
+                        pageBookmarked = sessionActions?.pageBookmarked == true,
                         onSavePage = {
                             sessionActions?.saveCurrentPage()
                                 ?: context.toastOnUi("请先打开网页")
@@ -860,6 +856,21 @@ private fun TabletToolboxFloatingCard(
                             onSidePanelChange(TabletSidePanel.None)
                             onEnterChromeFullscreen()
                         },
+                        onTranslatePage = {
+                            onSidePanelChange(TabletSidePanel.None)
+                            sessionActions?.translatePage()
+                                ?: context.toastOnUi("请先打开网页")
+                        },
+                        onOpenTranslationSettings = {
+                            onSidePanelChange(TabletSidePanel.None)
+                            context.startActivity(
+                                io.legado.app.ui.main.MainIntent.createSettingsIntent(
+                                    context,
+                                    io.legado.app.ui.main.MainRouteConst.ROUTE_SETTINGS_TRANSLATION,
+                                ),
+                            )
+                        },
+                        pageTranslated = sessionActions?.pageTranslated == true,
                     ),
                     onDismiss = { onSidePanelChange(TabletSidePanel.None) },
                     modifier = Modifier
@@ -1070,6 +1081,30 @@ private fun TabletFunctionBar(
                     }
                 },
             )
+            // SPEC-254/262: 需要翻译或已译（可还原）时显示地址栏翻译键。
+            val showTranslateKey = sessionActions?.pageNeedsTranslate == true ||
+                sessionActions?.pageTranslated == true
+            if (showTranslateKey) {
+                IconButton(
+                    onClick = {
+                        sessionActions.translatePage()
+                    },
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    SymbolIcon(
+                        symbol = Symbols.Translate,
+                        contentDescription = if (sessionActions?.pageTranslated == true) {
+                            "恢复原文"
+                        } else {
+                            "翻译"
+                        },
+                        modifier = Modifier.size(22.dp),
+                        tint = scheme.onSurface,
+                    )
+                }
+            }
+            // SPEC-259: toggle add / remove bookmark for current URL.
+            val bookmarked = sessionActions?.pageBookmarked == true
             IconButton(
                 onClick = {
                     sessionActions?.addBookmark()
@@ -1078,8 +1113,8 @@ private fun TabletFunctionBar(
                 modifier = Modifier.size(36.dp),
             ) {
                 SymbolIcon(
-                    symbol = Symbols.BookmarkAdd,
-                    contentDescription = "加入收藏",
+                    symbol = if (bookmarked) Symbols.BookmarkRemove else Symbols.BookmarkAdd,
+                    contentDescription = if (bookmarked) "移出收藏" else "加入收藏",
                     modifier = Modifier.size(22.dp),
                     tint = scheme.onSurface,
                 )

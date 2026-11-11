@@ -14,9 +14,13 @@ import io.legado.app.domain.model.AiToolApprovalState
 import io.legado.app.domain.model.reasoningContent
 import io.legado.app.domain.model.textContent
 import io.legado.app.domain.model.toolParts
+import io.legado.app.domain.model.usagePart
 import io.legado.app.domain.usecase.AiChatGenerationUseCase
 import io.legado.app.domain.usecase.PendingToolRun
 import io.legado.app.domain.usecase.ToolTraceBuilder
+import io.legado.app.model.ai.AiTokenEstimator
+import io.legado.app.model.ai.AiTokenUsage
+import io.legado.app.model.ai.AiUsageLedger
 import io.legado.app.utils.GSON
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
@@ -28,6 +32,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.update
@@ -45,6 +50,8 @@ class AiChatViewModel(
     private var streamingJob: Job? = null
     private var pendingToolRun: PendingToolRun? = null
     private var thinkingStartTime: Long = 0L
+    /** SPEC-250: 用户关闭未配置提示后，进页不再反复弹出，直至再次发送或配置状态变化。 */
+    private var missingModelPromptDismissed = false
 
     private val _uiState = MutableStateFlow(AiChatUiState())
     val uiState = _uiState.asStateFlow()
@@ -52,9 +59,15 @@ class AiChatViewModel(
     private val _effects = MutableSharedFlow<AiChatEffect>(extraBufferCapacity = 16)
     val effects = _effects.asSharedFlow()
 
+    private var lastReportedUsage: AiTokenUsage? = null
+    private var lastStreamRequest: io.legado.app.domain.model.AiGenerateRequest? = null
+    private var bootstrapDone = false
+
     init {
         observeConversations()
         observeCurrentMessages()
+        observeModelConfigured()
+        observeAvailableModels()
     }
 
     fun onIntent(intent: AiChatIntent) {
@@ -70,7 +83,60 @@ class AiChatViewModel(
             is AiChatIntent.SwitchBranch -> switchBranch(intent.messageId)
             is AiChatIntent.DeleteConversation -> deleteConversation(intent.id)
             is AiChatIntent.RenameConversation -> renameConversation(intent.id, intent.title)
+            AiChatIntent.DismissMissingModelPrompt -> dismissMissingModelPrompt()
+            AiChatIntent.OpenAiSettings -> {
+                dismissMissingModelPrompt()
+                _effects.tryEmit(AiChatEffect.OpenAiSettings)
+            }
+            AiChatIntent.OpenModelPicker -> {
+                _uiState.update { it.copy(showModelPicker = true) }
+            }
+            AiChatIntent.DismissModelPicker -> {
+                _uiState.update { it.copy(showModelPicker = false) }
+            }
+            is AiChatIntent.SelectModel -> selectModel(intent.modelProfileId)
+            AiChatIntent.AddModel -> {
+                _uiState.update { it.copy(showModelPicker = false) }
+                _effects.tryEmit(AiChatEffect.OpenAiSettings)
+            }
         }
+    }
+
+    private fun observeModelConfigured() {
+        viewModelScope.launch {
+            combine(
+                aiProfileGateway.observePresets(),
+                aiProfileGateway.observeModels(),
+                aiProfileGateway.observeProviders(),
+            ) { _, _, _ ->
+                isDefaultModelConfigured()
+            }.collect { configured ->
+                if (configured) {
+                    missingModelPromptDismissed = false
+                }
+                _uiState.update { current ->
+                    current.copy(
+                        isModelConfigured = configured,
+                        showMissingModelPrompt = !configured && !missingModelPromptDismissed,
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun isDefaultModelConfigured(): Boolean {
+        return aiProfileGateway.getTaskPreset(AiTaskType.CHAT) != null ||
+            aiProfileGateway.getTaskPreset(AiTaskType.TRANSLATE_CHAPTER) != null
+    }
+
+    private fun dismissMissingModelPrompt() {
+        missingModelPromptDismissed = true
+        _uiState.update { it.copy(showMissingModelPrompt = false) }
+    }
+
+    private fun promptMissingModel() {
+        missingModelPromptDismissed = false
+        _uiState.update { it.copy(showMissingModelPrompt = true) }
     }
 
     // ---- Conversation lifecycle ----
@@ -95,10 +161,82 @@ class AiChatViewModel(
                         }.toImmutableList()
                     )
                 }
-                if (selectedId == null) {
-                    conversations.firstOrNull()?.let { selectConversation(it.id) }
-                        ?: createConversation()
+                // SPEC-262: bootstrap once — default new chat; optional restore last.
+                if (selectedId == null && !bootstrapDone) {
+                    bootstrapDone = true
+                    if (AiUsageLedger.restoreLastChatEnabled()) {
+                        conversations.firstOrNull()?.let { selectConversation(it.id) }
+                            ?: createConversation()
+                    } else {
+                        createConversation()
+                    }
                 }
+            }
+        }
+    }
+
+    private fun observeAvailableModels() {
+        viewModelScope.launch {
+            combine(
+                aiProfileGateway.observeModels(),
+                aiProfileGateway.observeProviders(),
+                aiProfileGateway.observePresets(),
+            ) { models, providers, presets ->
+                Triple(models, providers, presets)
+            }.collect { (models, providers, presets) ->
+                val providerNames = providers.associate { it.id to it.name }
+                val currentId = presets.firstOrNull {
+                    it.taskType == AiTaskType.CHAT && it.isDefault
+                }?.modelProfileId
+                    ?: presets.firstOrNull {
+                        it.taskType == AiTaskType.TRANSLATE_CHAPTER && it.isDefault
+                    }?.modelProfileId
+                val options = models.map { model ->
+                    AiChatModelOptionUi(
+                        modelProfileId = model.id,
+                        providerName = providerNames[model.providerId].orEmpty(),
+                        modelName = model.displayName.ifBlank { model.modelId },
+                        isSelected = model.id == currentId,
+                    )
+                }
+                _uiState.update {
+                    it.copy(
+                        availableModels = options.toImmutableList(),
+                        currentModelProfileId = currentId,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun selectModel(modelProfileId: String) {
+        viewModelScope.launch {
+            runCatching {
+                aiProfileGateway.setDefaultModel(modelProfileId)
+                val model = aiProfileGateway.getModel(modelProfileId)
+                val provider = model?.let { aiProfileGateway.getProvider(it.providerId) }
+                Triple(
+                    model?.displayName.orEmpty().ifBlank { model?.modelId.orEmpty() },
+                    provider?.name.orEmpty(),
+                    modelProfileId,
+                )
+            }.onSuccess { (modelName, providerName, id) ->
+                _uiState.update { state ->
+                    state.copy(
+                        showModelPicker = false,
+                        currentModelProfileId = id,
+                        conversations = state.conversations.map { conv ->
+                            if (conv.id == state.currentConversationId) {
+                                conv.copy(providerName = providerName, modelName = modelName)
+                            } else conv
+                        }.toImmutableList(),
+                        availableModels = state.availableModels.map {
+                            it.copy(isSelected = it.modelProfileId == id)
+                        }.toImmutableList(),
+                    )
+                }
+            }.onFailure { error ->
+                _effects.tryEmit(AiChatEffect.ShowMessage(error.message ?: "切换模型失败"))
             }
         }
     }
@@ -111,6 +249,7 @@ class AiChatViewModel(
                 .collect { messages ->
                     lastMessages = messages.map { msg ->
                         val parts = AiMessagePartJson.decode(msg.partsJson)
+                        val usage = parts.usagePart()
                         AiChatMessageUi(
                             id = msg.id,
                             role = msg.role,
@@ -123,7 +262,15 @@ class AiChatViewModel(
                             bookResults = parts.bookResults().toImmutableList(),
                             branchIndex = msg.branchIndex,
                             totalBranches = 1, // will be updated below
-                            parentMessageId = msg.parentMessageId
+                            parentMessageId = msg.parentMessageId,
+                            tokenUsage = usage?.let {
+                                AiChatTokenUsageUi(
+                                    promptTokens = it.promptTokens,
+                                    completionTokens = it.completionTokens,
+                                    totalTokens = it.totalTokens,
+                                    estimated = it.estimated,
+                                )
+                            },
                         )
                     }
                     // Update totalBranches for assistant messages with parent (batch query)
@@ -158,6 +305,16 @@ class AiChatViewModel(
         streamingJob?.cancel()
         pendingToolRun = null
         currentConversationId.value = id
+        // SPEC-262: clear immediately to avoid painting previous chat during switch.
+        _uiState.update {
+            it.copy(
+                currentConversationId = id,
+                messages = persistentListOf(),
+                streamingMessage = null,
+                pendingToolConfirmation = null,
+                isSending = false,
+            )
+        }
         viewModelScope.launch {
             val conversation = aiChatGateway.getConversation(id)
             val preset = aiProfileGateway.getTaskPreset(AiTaskType.CHAT)
@@ -168,9 +325,8 @@ class AiChatViewModel(
             _uiState.update { current ->
                 current.copy(
                     currentConversationId = id,
-                    reasoningLevel = conversation?.reasoningLevel?.let {
-                        runCatching { AiReasoningLevel.valueOf(it.uppercase()) }.getOrNull()
-                    } ?: current.reasoningLevel,
+                    // SPEC-260: chat always AUTO regardless of stored conversation value.
+                    reasoningLevel = AiReasoningLevel.AUTO,
                     streamingMessage = null,
                     pendingToolConfirmation = null,
                     isSending = false,
@@ -260,11 +416,12 @@ class AiChatViewModel(
         }
     }
 
-    private fun updateReasoningLevel(level: AiReasoningLevel) {
-        _uiState.update { it.copy(reasoningLevel = level) }
+    /** SPEC-260: chat UI locks to AUTO; ignore multi-level changes. */
+    private fun updateReasoningLevel(@Suppress("UNUSED_PARAMETER") level: AiReasoningLevel) {
+        _uiState.update { it.copy(reasoningLevel = AiReasoningLevel.AUTO) }
         val conversationId = currentConversationId.value ?: return
         viewModelScope.launch {
-            aiChatGateway.updateReasoningLevel(conversationId, level.name.lowercase())
+            aiChatGateway.updateReasoningLevel(conversationId, AiReasoningLevel.AUTO.name.lowercase())
         }
     }
 
@@ -292,7 +449,7 @@ class AiChatViewModel(
                 val shortTitle = generationUseCase.generateTitle(
                     userContent = userContent,
                     assistantContent = assistantContent,
-                    reasoningLevel = state.reasoningLevel
+                    reasoningLevel = AiReasoningLevel.AUTO
                 )
                 if (shortTitle.isNotBlank()) {
                     aiChatGateway.updateConversationTitle(conversationId, shortTitle)
@@ -308,6 +465,10 @@ class AiChatViewModel(
         val message = lastMessages.find { it.id == messageId }
             ?: return
         if (message.role != AiMessageRole.ASSISTANT || message.parentMessageId == null) return
+        if (!_uiState.value.isModelConfigured) {
+            promptMissingModel()
+            return
+        }
         val parentUserMsg = lastMessages.find { it.id == message.parentMessageId }
             ?: return
         val historyBeforeParent = lastMessages.filter { it.createdAt < parentUserMsg.createdAt }
@@ -326,7 +487,7 @@ class AiChatViewModel(
                 val request = generationUseCase.buildRequest(
                     userContent = parentUserMsg.content,
                     history = historyBeforeParent,
-                    reasoningLevel = state.reasoningLevel,
+                    reasoningLevel = AiReasoningLevel.AUTO,
                     conversationId = conversationId
                 )
                 setStreamingPlaceholder()
@@ -371,7 +532,8 @@ class AiChatViewModel(
                             parts = generationUseCase.buildAssistantParts(
                                 text = assistantContent,
                                 reasoning = fullReasoning.toString(),
-                                toolTrace = toolTrace
+                                toolTrace = toolTrace,
+                                usage = usagePartForSave(assistantContent),
                             ),
                             parentMessageId = message.parentMessageId,
                             thinkingDuration = duration
@@ -402,6 +564,10 @@ class AiChatViewModel(
     private fun sendMessage(rawContent: String) {
         val content = rawContent.trim()
         if (content.isBlank() || _uiState.value.isSending) return
+        if (!_uiState.value.isModelConfigured) {
+            promptMissingModel()
+            return
+        }
         streamingJob?.cancel()
         val historySnapshot = lastMessages
         streamingJob = viewModelScope.launch {
@@ -430,7 +596,7 @@ class AiChatViewModel(
                 val request = generationUseCase.buildRequest(
                     userContent = content,
                     history = historySnapshot,
-                    reasoningLevel = state.reasoningLevel,
+                    reasoningLevel = AiReasoningLevel.AUTO,
                     conversationId = conversationIdForMsg
                 )
                 setStreamingPlaceholder()
@@ -475,7 +641,8 @@ class AiChatViewModel(
                             parts = generationUseCase.buildAssistantParts(
                                 text = assistantContent,
                                 reasoning = fullReasoning.toString(),
-                                toolTrace = toolTrace
+                                toolTrace = toolTrace,
+                                usage = usagePartForSave(assistantContent),
                             ),
                             parentMessageId = parentMessageId,
                             thinkingDuration = duration
@@ -529,14 +696,16 @@ class AiChatViewModel(
         } finally {
             if (!waitingForToolConfirmation && pending.conversationId != null && fullText.isNotEmpty()) {
                 val duration = _uiState.value.streamingMessage?.thinkingDuration ?: 0
+                val text = fullText.toString()
                 runCatching {
                     aiChatGateway.saveMessage(
                         conversationId = pending.conversationId,
                         role = AiMessageRole.ASSISTANT,
                         parts = generationUseCase.buildAssistantParts(
-                            text = fullText.toString(),
+                            text = text,
                             reasoning = fullReasoning.toString(),
-                            toolTrace = pending.toolTrace
+                            toolTrace = pending.toolTrace,
+                            usage = usagePartForSave(text),
                         ),
                         parentMessageId = pending.parentMessageId,
                         thinkingDuration = duration
@@ -613,6 +782,8 @@ class AiChatViewModel(
         fullReasoning: StringBuilder,
         toolTrace: ToolTraceBuilder
     ) {
+        lastReportedUsage = null
+        lastStreamRequest = request
         generationUseCase.collectStream(
             request = request,
             toolTrace = toolTrace,
@@ -651,8 +822,53 @@ class AiChatViewModel(
                     } ?: state
                 }
             },
-            onToolTraceUpdate = { updateStreamingToolTrace(toolTrace) }
+            onToolTraceUpdate = { updateStreamingToolTrace(toolTrace) },
+            onUsage = { usage ->
+                lastReportedUsage = AiTokenUsage(
+                    promptTokens = usage.promptTokens,
+                    completionTokens = usage.completionTokens,
+                    totalTokens = usage.totalTokens,
+                    estimated = false,
+                )
+            },
         )
+    }
+
+    /** SPEC-262: prefer API usage; else estimate from prompt+completion text. */
+    private fun resolveUsage(
+        request: io.legado.app.domain.model.AiGenerateRequest,
+        completion: String,
+    ): AiTokenUsage {
+        lastReportedUsage?.let { return it }
+        val promptText = request.messages.joinToString("\n") { it.content.orEmpty() }
+        return AiTokenEstimator.estimatePair(promptText, completion)
+    }
+
+    private fun AiTokenUsage.toPart(): AiMessagePart.Usage =
+        AiMessagePart.Usage(
+            promptTokens = promptTokens,
+            completionTokens = completionTokens,
+            totalTokens = totalTokens,
+            estimated = estimated,
+        )
+
+    private fun AiTokenUsage.toUi(): AiChatTokenUsageUi =
+        AiChatTokenUsageUi(
+            promptTokens = promptTokens,
+            completionTokens = completionTokens,
+            totalTokens = totalTokens,
+            estimated = estimated,
+        )
+
+    private fun usagePartForSave(completion: String): AiMessagePart.Usage {
+        val req = lastStreamRequest
+        val usage = if (req != null) {
+            resolveUsage(req, completion)
+        } else {
+            AiTokenEstimator.estimatePair("", completion)
+        }
+        AiUsageLedger.record(usage)
+        return usage.toPart()
     }
 
     private fun setStreamingPlaceholder() {
@@ -781,6 +997,7 @@ private fun JsonObject.toBookResultUi(): AiChatBookResultUi? {
         bookUrl = bookUrl,
         name = string("name").orEmpty(),
         author = string("author").orEmpty(),
+        // Prefer engine origin (browsesth://…) over display originName for SPEC-261 labeling.
         origin = string("origin") ?: string("originName"),
         coverPath = string("coverPath") ?: string("coverUrl"),
         latestChapterTitle = string("latestChapterTitle"),

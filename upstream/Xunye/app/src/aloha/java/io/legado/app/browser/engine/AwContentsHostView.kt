@@ -148,8 +148,12 @@ class AwContentsHostView @JvmOverloads constructor(
             // WebSettings.LOAD_DEFAULT = -1
             settings.cacheMode = -1
         }.onFailure { Log.w(TAG, "setCacheMode: ${it.message}") }
-        // SPEC-043: Chromium Force Dark / algorithmic darkening (Edge-like).
-        applyWebContentDarkMode(settings, chromePrefs.webContentDarkMode)
+        // SPEC-043/259: Chromium Force Dark / algorithmic darkening (Edge-like).
+        applyWebContentDarkMode(
+            settings,
+            chromePrefs.webContentDarkMode,
+            BrowserChromePrefs.isSystemNightMode(context),
+        )
         // SPEC-107: Chrome/Edge-style accessibility text zoom for webpage fonts only.
         runCatching {
             settings.textZoom = chromePrefs.textZoomPercent
@@ -203,10 +207,14 @@ class AwContentsHostView @JvmOverloads constructor(
         applyWebContentDarkMode(settings, BrowserChromePrefs.WEB_DARK_OFF)
     }
 
-    /** SPEC-107: apply webpage Force Dark to the live session (settings + toolbox). */
+    /** SPEC-107/259: apply webpage Force Dark to the live session (settings + toolbox). */
     fun applyWebContentDarkMode(mode: String) {
         val settings = awSettings ?: return
-        Companion.applyWebContentDarkMode(settings, mode)
+        Companion.applyWebContentDarkMode(
+            settings,
+            mode,
+            BrowserChromePrefs.isSystemNightMode(context),
+        )
     }
 
     /** SPEC-107: Chrome/Edge accessibility-equivalent webpage text zoom. */
@@ -494,6 +502,11 @@ class AwContentsHostView @JvmOverloads constructor(
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         awContents?.viewMethods?.onConfigurationChanged(newConfig)
+        // SPEC-259: re-resolve「跟随系统」when system night flips.
+        val prefs = BrowserChromePrefs(context)
+        if (prefs.webContentDarkMode == BrowserChromePrefs.WEB_DARK_AUTO) {
+            applyWebContentDarkMode(BrowserChromePrefs.WEB_DARK_AUTO)
+        }
     }
 
     override fun onFocusChanged(focused: Boolean, direction: Int, previouslyFocusedRect: Rect?) {
@@ -793,12 +806,18 @@ class AwContentsHostView @JvmOverloads constructor(
          * SPEC-153: direct calls — by-name reflection broke under R8 (release
          * renamed/stripped the members, NoSuchMethodException was swallowed and
          * the 网页背景 toggle silently did nothing).
+         * SPEC-259: AUTO resolves via [nightMode] to ON/OFF (Chromium AUTO was a no-op
+         * for many light sites when parent View force-dark was unset).
          */
-        fun applyWebContentDarkMode(settings: AwSettings, mode: String) {
-            val forceMode = when (mode) {
-                BrowserChromePrefs.WEB_DARK_OFF -> 0
+        fun applyWebContentDarkMode(
+            settings: AwSettings,
+            mode: String,
+            nightMode: Boolean = false,
+        ) {
+            val resolved = BrowserChromePrefs.resolveWebContentDarkMode(mode, nightMode)
+            val forceMode = when (resolved) {
                 BrowserChromePrefs.WEB_DARK_ON -> 2
-                else -> 1 // auto
+                else -> 0
             }
             runCatching { settings.setForceDarkMode(forceMode) }
                 .onFailure { Log.w(TAG, "setForceDarkMode: ${it.message}") }
@@ -807,6 +826,9 @@ class AwContentsHostView @JvmOverloads constructor(
                     .onFailure { Log.w(TAG, "setForceDarkBehavior: ${it.message}") }
                 runCatching { settings.setAlgorithmicDarkeningAllowed(true) }
                     .onFailure { Log.w(TAG, "setAlgorithmicDarkeningAllowed: ${it.message}") }
+            } else {
+                runCatching { settings.setAlgorithmicDarkeningAllowed(false) }
+                    .onFailure { Log.w(TAG, "setAlgorithmicDarkeningAllowed(false): ${it.message}") }
             }
         }
     }

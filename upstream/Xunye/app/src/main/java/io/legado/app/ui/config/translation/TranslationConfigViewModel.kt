@@ -39,6 +39,10 @@ class TranslationConfigViewModel(
                         settings.copy(targetLanguage = intent.value)
                     is TranslationConfigIntent.SetMaxCharsPerChunk ->
                         settings.copy(maxCharsPerChunk = intent.value)
+                    is TranslationConfigIntent.SetAutoTranslateWebpage ->
+                        settings.copy(autoTranslateWebpage = intent.value)
+                    is TranslationConfigIntent.SetAutoTranslateJingdu ->
+                        settings.copy(autoTranslateJingdu = intent.value)
                 }
             }
         }

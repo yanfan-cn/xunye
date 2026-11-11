@@ -428,6 +428,9 @@ object MainNavigator {
             MainRouteConst.ROUTE_SETTINGS_THEME -> MainRouteSettingsTheme
             MainRouteConst.ROUTE_SETTINGS_BACKUP -> MainRouteSettingsBackup
             MainRouteConst.ROUTE_SETTINGS_AI -> MainRouteSettingsAi
+            MainRouteConst.ROUTE_SETTINGS_AI_SUMMARY -> MainRouteSettingsAiSummary
+            MainRouteConst.ROUTE_SETTINGS_AI_PROMPT -> MainRouteSettingsAiPrompt
+            MainRouteConst.ROUTE_SETTINGS_AI_USAGE -> MainRouteSettingsAiUsage
             MainRouteConst.ROUTE_AI_CHAT -> MainRouteAiChat
             MainRouteConst.ROUTE_SETTINGS_CUSTOM_THEME -> MainRouteSettingsCustomTheme
             MainRouteConst.ROUTE_SETTINGS_PRIVATE -> MainRouteSettingsPrivate

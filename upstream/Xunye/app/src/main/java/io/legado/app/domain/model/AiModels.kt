@@ -49,7 +49,69 @@ object AiMessageRole {
 }
 
 object AiProviderPresets {
+    /**
+     * SPEC-258/260: wizard presets only — DeepSeek (default first), Xiaomi MiMo,
+     * Zhipu GLM, Qwen. Other vendors remain in [items] for advanced custom paths.
+     */
+    val wizardItems: List<AiProviderPreset>
+        get() = items.filter { it.showInWizard }
+
     val items = listOf(
+        AiProviderPreset(
+            id = "deepseek",
+            name = "DeepSeek",
+            protocol = AiProtocol.OPENAI_CHAT_COMPLETIONS,
+            baseUrl = "https://api.deepseek.com",
+            modelsUrl = "https://api.deepseek.com/models",
+            modelName = "DeepSeek V4.1 Flash",
+            modelId = "deepseek-flash",
+            showInWizard = true,
+            suggestedModels = listOf(
+                AiSuggestedModel("DeepSeek V4.1 Flash", "deepseek-flash"),
+                AiSuggestedModel("DeepSeek V4 Pro", "deepseek-v4-pro"),
+            ),
+        ),
+        AiProviderPreset(
+            id = "xiaomi_mimo",
+            name = "小米 MiMo",
+            protocol = AiProtocol.OPENAI_CHAT_COMPLETIONS,
+            baseUrl = "https://api.xiaomimimo.com/v1",
+            modelsUrl = "https://api.xiaomimimo.com/v1/models",
+            modelName = "MiMo V2.5 Pro",
+            modelId = "mimo-v2.5-pro",
+            showInWizard = true,
+            suggestedModels = listOf(
+                AiSuggestedModel("MiMo V2.5 Pro", "mimo-v2.5-pro"),
+            ),
+        ),
+        AiProviderPreset(
+            id = "zhipu_glm",
+            name = "智谱 GLM",
+            protocol = AiProtocol.OPENAI_CHAT_COMPLETIONS,
+            baseUrl = "https://open.bigmodel.cn/api/paas/v4",
+            modelsUrl = "https://open.bigmodel.cn/api/paas/v4/models",
+            modelName = "GLM-5.1",
+            modelId = "glm-5.1",
+            showInWizard = true,
+            suggestedModels = listOf(
+                AiSuggestedModel("GLM-5.1", "glm-5.1"),
+                AiSuggestedModel("GLM-4.7 Flash", "glm-4.7-flash"),
+            ),
+        ),
+        AiProviderPreset(
+            id = "qwen",
+            name = "千问 Qwen",
+            protocol = AiProtocol.OPENAI_CHAT_COMPLETIONS,
+            baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            modelsUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1/models",
+            modelName = "Qwen Plus",
+            modelId = "qwen-plus",
+            showInWizard = true,
+            suggestedModels = listOf(
+                AiSuggestedModel("Qwen Plus", "qwen-plus"),
+                AiSuggestedModel("Qwen Max", "qwen-max"),
+            ),
+        ),
         AiProviderPreset(
             id = "openai_chat",
             name = "OpenAI",
@@ -57,7 +119,14 @@ object AiProviderPresets {
             baseUrl = "https://api.openai.com/v1",
             modelsUrl = "https://api.openai.com/v1/models",
             modelName = "GPT-4.1 mini",
-            modelId = "gpt-4.1-mini"
+            modelId = "gpt-4.1-mini",
+            showInWizard = false,
+            suggestedModels = listOf(
+                AiSuggestedModel("GPT-4.1 mini", "gpt-4.1-mini"),
+                AiSuggestedModel("GPT-4.1", "gpt-4.1"),
+                AiSuggestedModel("GPT-4o", "gpt-4o"),
+                AiSuggestedModel("o4-mini", "o4-mini"),
+            ),
         ),
         AiProviderPreset(
             id = "openai_responses",
@@ -66,16 +135,8 @@ object AiProviderPresets {
             baseUrl = "https://api.openai.com/v1",
             modelsUrl = "https://api.openai.com/v1/models",
             modelName = "GPT-4.1 mini",
-            modelId = "gpt-4.1-mini"
-        ),
-        AiProviderPreset(
-            id = "deepseek",
-            name = "DeepSeek",
-            protocol = AiProtocol.OPENAI_CHAT_COMPLETIONS,
-            baseUrl = "https://api.deepseek.com",
-            modelsUrl = "https://api.deepseek.com/models",
-            modelName = "DeepSeek Chat",
-            modelId = "deepseek-chat"
+            modelId = "gpt-4.1-mini",
+            showInWizard = false,
         ),
         AiProviderPreset(
             id = "deepseek_anthropic",
@@ -83,17 +144,9 @@ object AiProviderPresets {
             protocol = AiProtocol.ANTHROPIC_MESSAGES,
             baseUrl = "https://api.deepseek.com/anthropic",
             modelsUrl = "https://api.deepseek.com/models",
-            modelName = "DeepSeek Chat",
-            modelId = "deepseek-chat"
-        ),
-        AiProviderPreset(
-            id = "xiaomi_mimo",
-            name = "Xiaomi MiMo",
-            protocol = AiProtocol.OPENAI_CHAT_COMPLETIONS,
-            baseUrl = "https://api.xiaomimimo.com/v1",
-            modelsUrl = "https://api.xiaomimimo.com/v1/models",
-            modelName = "MiMo V2.5 Pro",
-            modelId = "mimo-v2.5-pro"
+            modelName = "DeepSeek V4.1 Flash",
+            modelId = "deepseek-flash",
+            showInWizard = false,
         ),
         AiProviderPreset(
             id = "xiaomi_mimo_anthropic",
@@ -102,7 +155,8 @@ object AiProviderPresets {
             baseUrl = "https://api.xiaomimimo.com/anthropic",
             modelsUrl = "https://api.xiaomimimo.com/v1/models",
             modelName = "MiMo V2.5 Pro",
-            modelId = "mimo-v2.5-pro"
+            modelId = "mimo-v2.5-pro",
+            showInWizard = false,
         ),
         AiProviderPreset(
             id = "anthropic",
@@ -111,10 +165,49 @@ object AiProviderPresets {
             baseUrl = "https://api.anthropic.com",
             modelsUrl = "https://api.anthropic.com/v1/models",
             modelName = "Claude Sonnet",
-            modelId = "claude-sonnet-4-20250514"
-        )
+            modelId = "claude-sonnet-4-20250514",
+            showInWizard = false,
+            suggestedModels = listOf(
+                AiSuggestedModel("Claude Sonnet 4", "claude-sonnet-4-20250514"),
+                AiSuggestedModel("Claude Opus 4", "claude-opus-4-20250514"),
+            ),
+        ),
+        AiProviderPreset(
+            id = "siliconflow",
+            name = "SiliconFlow",
+            protocol = AiProtocol.OPENAI_CHAT_COMPLETIONS,
+            baseUrl = "https://api.siliconflow.cn/v1",
+            modelsUrl = "https://api.siliconflow.cn/v1/models",
+            modelName = "DeepSeek V3",
+            modelId = "deepseek-ai/DeepSeek-V3",
+            showInWizard = false,
+            suggestedModels = listOf(
+                AiSuggestedModel("DeepSeek V3", "deepseek-ai/DeepSeek-V3"),
+                AiSuggestedModel("Qwen3 235B", "Qwen/Qwen3-235B-A22B"),
+            ),
+        ),
+        AiProviderPreset(
+            id = "moonshot",
+            name = "Moonshot (Kimi)",
+            protocol = AiProtocol.OPENAI_CHAT_COMPLETIONS,
+            baseUrl = "https://api.moonshot.cn/v1",
+            modelsUrl = "https://api.moonshot.cn/v1/models",
+            modelName = "Kimi K2",
+            modelId = "kimi-k2-0711-preview",
+            showInWizard = false,
+            suggestedModels = listOf(
+                AiSuggestedModel("Kimi K2", "kimi-k2-0711-preview"),
+                AiSuggestedModel("moonshot-v1-128k", "moonshot-v1-128k"),
+            ),
+        ),
     )
 }
+
+@Keep
+data class AiSuggestedModel(
+    val displayName: String,
+    val modelId: String,
+)
 
 @Keep
 data class AiProviderPreset(
@@ -124,7 +217,9 @@ data class AiProviderPreset(
     val baseUrl: String,
     val modelsUrl: String,
     val modelName: String,
-    val modelId: String
+    val modelId: String,
+    val showInWizard: Boolean = false,
+    val suggestedModels: List<AiSuggestedModel> = emptyList(),
 )
 
 @Keep

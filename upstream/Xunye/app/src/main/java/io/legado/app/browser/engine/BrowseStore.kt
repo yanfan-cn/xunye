@@ -139,6 +139,13 @@ class BrowseStore(context: Context) {
             override fun capacityLeft(): Int = (MAX_BOOKMARKS - liveCount).coerceAtLeast(0)
         }
 
+    /** SPEC-259: exact URL match for toolbox / omnibox bookmark toggle. */
+    fun isBookmarked(url: String): Boolean {
+        val clean = url.trim()
+        if (clean.isEmpty()) return false
+        return bookmarks().any { it.url == clean }
+    }
+
     fun removeBookmark(url: String) {
         writeEntries(KEY_BOOKMARKS, bookmarks().filterNot { it.url == url })
     }

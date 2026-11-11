@@ -22,7 +22,7 @@ alwaysApply: true
 
 - 产品名：**巡页Xunye**；`applicationId`：**`com.xunye.app`**；远程：`https://github.com/yanfan-cn/xunye`
 - 产品工程目录：`upstream/Xunye`（原 `upstream/legado-with-MD3`）
-- 本地根目录当前可为：`D:\cursor\browsesth`（仅路径；新克隆优先 `D:\cursor\xunye`）
+- 本地根目录为：`D:\cursor\Xunye`
 - 旁系参考（只读）：`D:\cursor\legado-with-MD3`、`D:\cursor\Cimoc`
 - **禁止**再以 Browsesth / `com.browsesth.app` 作为新构建或安装身份（内部持久化键可仍含历史 `browsesth*`）
 

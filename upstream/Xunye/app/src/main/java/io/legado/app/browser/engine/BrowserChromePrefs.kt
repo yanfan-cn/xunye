@@ -1,6 +1,7 @@
 package io.legado.app.browser.engine
 
 import android.content.Context
+import android.content.res.Configuration
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -175,5 +176,22 @@ class BrowserChromePrefs(context: Context) {
         const val TEXT_ZOOM_MIN = 50
         const val TEXT_ZOOM_MAX = 200
         const val TEXT_ZOOM_STEP = 10
+
+        /** SPEC-259: system night for resolving「跟随系统」→ Force Dark ON/OFF. */
+        fun isSystemNightMode(context: Context): Boolean {
+            val night = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+            return night == Configuration.UI_MODE_NIGHT_YES
+        }
+
+        /**
+         * SPEC-259: map toolbox pref to effective off/on.
+         * AUTO follows [nightMode] instead of Chromium FORCE_DARK_AUTO (parent-view dependent).
+         */
+        fun resolveWebContentDarkMode(mode: String, nightMode: Boolean): String =
+            when (mode) {
+                WEB_DARK_OFF -> WEB_DARK_OFF
+                WEB_DARK_ON -> WEB_DARK_ON
+                else -> if (nightMode) WEB_DARK_ON else WEB_DARK_OFF
+            }
     }
 }

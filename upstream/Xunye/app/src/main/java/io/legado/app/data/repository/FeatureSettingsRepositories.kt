@@ -194,13 +194,19 @@ internal fun CoverSettings.toPrefMap(): Map<String, Any?> = mapOf(
 
 internal fun Preferences.toTranslationSettings(): TranslationSettings {
     val storedProvider = compatDsString(PreferKey.llmProvider)
-    // SPEC-048: new default Baidu; openai legacy → app_ai; explicit google kept.
+    // SPEC-251: default Bergamot; drop Baidu/ML Kit; openai → app_ai.
     val provider = when (storedProvider) {
-        null -> TranslationConstants.PROVIDER_BAIDU
+        null -> TranslationConstants.PROVIDER_BERGAMOT
         TranslationConstants.PROVIDER_OPENAI -> TranslationConstants.PROVIDER_APP_AI
-        // SPEC-048: Microsoft deferred — fall back to Baidu.
-        TranslationConstants.PROVIDER_MICROSOFT -> TranslationConstants.PROVIDER_BAIDU
-        else -> storedProvider
+        TranslationConstants.PROVIDER_BAIDU,
+        TranslationConstants.PROVIDER_MLKIT,
+        TranslationConstants.PROVIDER_MICROSOFT,
+        -> TranslationConstants.PROVIDER_BERGAMOT
+        TranslationConstants.PROVIDER_BERGAMOT,
+        TranslationConstants.PROVIDER_APP_AI,
+        TranslationConstants.PROVIDER_GOOGLE,
+        -> storedProvider
+        else -> TranslationConstants.PROVIDER_BERGAMOT
     }
     return TranslationSettings(
         provider = provider,
@@ -208,6 +214,8 @@ internal fun Preferences.toTranslationSettings(): TranslationSettings {
         maxCharsPerChunk = compatDsInt(PreferKey.llmMaxCharsPerChunk) ?: 10000,
         concurrentChunks = compatDsInt(PreferKey.llmConcurrentChunks) ?: 1,
         retryCount = compatDsInt(PreferKey.llmRetryCount) ?: 2,
+        autoTranslateWebpage = compatDsBoolean(PreferKey.autoTranslateWebpage) ?: false,
+        autoTranslateJingdu = compatDsBoolean(PreferKey.autoTranslateJingdu) ?: false,
     )
 }
 
@@ -217,6 +225,8 @@ internal fun TranslationSettings.toPrefMap(): Map<String, Any?> = mapOf(
     PreferKey.llmMaxCharsPerChunk to maxCharsPerChunk,
     PreferKey.llmConcurrentChunks to concurrentChunks,
     PreferKey.llmRetryCount to retryCount,
+    PreferKey.autoTranslateWebpage to autoTranslateWebpage,
+    PreferKey.autoTranslateJingdu to autoTranslateJingdu,
 )
 
 internal fun Preferences.toBackupSettings(): BackupSettings = BackupSettings(

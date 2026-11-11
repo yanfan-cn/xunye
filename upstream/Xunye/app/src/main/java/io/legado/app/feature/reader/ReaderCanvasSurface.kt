@@ -1794,11 +1794,18 @@ private fun ScrollPageStack(
                 }.toMap()
             }
             if (loadedSources.isNotEmpty()) data.textBackgroundRevision.value++
+            // SPEC-259: load inline images then bump revision so Canvas redraws without a
+            // user scroll (was: bitmaps entered LRU but draw never re-ran until fling).
+            var loadedInline = false
             page.elements.filterIsInstance<ReaderElement.Image>().forEach { element ->
                 // The controller owns inline bitmaps in a byte-bounded LRU. Do not retain
                 // another strong reference for every cached draw page.
-                if (cachedImage(element) == null) loadImage(element)
+                if (cachedImage(element) == null) {
+                    loadImage(element)
+                    loadedInline = true
+                }
             }
+            if (loadedInline) data.textBackgroundRevision.value++
         }
     }
     Canvas(

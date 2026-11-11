@@ -45,6 +45,7 @@ class AiToolAwareGenerationUseCase(
                         toolTrace.append(event)
                         emit(event)
                     }
+                    is AiStreamEvent.Usage -> emit(event)
                 }
             }
 

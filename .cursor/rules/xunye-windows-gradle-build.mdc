@@ -7,7 +7,7 @@ alwaysApply: true
 
 产品身份一律 **Xunye**：`applicationId=com.xunye.app`，展示名「巡页Xunye」，仓库 `yanfan-cn/xunye`。**禁止**再按 Browsesth / `com.browsesth.app` 构建或安装新包。
 
-工程本地目录当前可为 **`D:\cursor\browsesth`**（仅磁盘路径；与产品名无关）。默认 Gradle 缓存在 **`C:\Users\…\.gradle`**。
+工程本地目录当前可为 **`D:\cursor\Xunye`**（仅磁盘路径；与产品名无关）。默认 Gradle 缓存在 **`C:\Users\…\.gradle`**。
 
 ## 必做
 
@@ -37,6 +37,7 @@ robocopy "C:\Users\32082\.gradle\caches" "D:\cursor\.gradle-home\caches" /E /J /
 
 - `assemble*`：本包用当前 `MAJOR.MINOR.PATCH-beta`，结束后 PATCH+1（SPEC-108）；APK 名 `巡页`+versionName；失败已 bump 时按交接处理，勿绕过
 - **默认打 debug 包（操作者 2026-10-21 指定）**：release 全量构建本机约 10–12 分钟（R8 混淆捆绑 Chromium），debug 约 1–3 分钟；**仅当操作者明确要求 release 时才 assembleAlohaRelease**（SPEC-222 起默认 flavor 名 `aloha`，原 `assembleAppRelease`），勿自行升包；旁路无 Aloha 包用 `assembleSystemWv*`
+- **构建互斥（操作者 2026-11-08）**：没有明确要求时**不要**构建 release；若本次任务是打 release，则**不要**再打 debug（二者不同次、不同时）
 - **Release 经验（2026-10-21，操作者要求记住）**：
   1. release 改代码后每次都要付 ~10 分钟 R8 成本，无法优化掉；纯重打包（未改代码）约 1 分钟
   2. assemble 必须带 `--no-configuration-cache`：`configuration-cache=true` + bump-on-configure 会导致一次构建双 bump（曾误产 巡页1.5.8，见 LOG-153）

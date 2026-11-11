@@ -44,7 +44,8 @@ object WebArticleExtractJs {
         if(!v)return '';var p=(v.split(',')[0]||'').trim().split(/\s+/)[0]||'';return p;
         }
         function imgTag(el){
-        var lazy=el.getAttribute('data-src')||el.getAttribute('data-original')||el.getAttribute('data-lazy-src')||el.getAttribute('data-url')||el.getAttribute('data-actualsrc')||el.getAttribute('data-original-src')||'';
+        // SPEC-259: extra lazy attrs (data-lazyload-src / data-echo / data-img).
+        var lazy=el.getAttribute('data-src')||el.getAttribute('data-original')||el.getAttribute('data-lazy-src')||el.getAttribute('data-url')||el.getAttribute('data-actualsrc')||el.getAttribute('data-original-src')||el.getAttribute('data-lazyload-src')||el.getAttribute('data-echo')||el.getAttribute('data-img')||'';
         if(!lazy)lazy=firstSrcset(el.getAttribute('data-srcset'));
         var src=lazy||el.currentSrc||el.src||'';
         if((!src||src.indexOf('data:')===0)&&el.srcset){src=firstSrcset(el.srcset);}

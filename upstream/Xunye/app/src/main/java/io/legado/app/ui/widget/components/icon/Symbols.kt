@@ -36,6 +36,8 @@ object Symbols {
     val Book2 = MaterialSymbol("book_2", autoMirror = false)
     val Bookmark = MaterialSymbol("bookmark", autoMirror = false)
     val BookmarkAdd = MaterialSymbol("bookmark_add", autoMirror = false)
+    /** SPEC-259: toolbox / tablet omnibox when current URL is already bookmarked. */
+    val BookmarkRemove = MaterialSymbol("bookmark_remove", autoMirror = false)
     val Bookmarks = MaterialSymbol("bookmarks", autoMirror = false)
     val BorderColor = MaterialSymbol("border_color", autoMirror = false)
     val Brightness6 = MaterialSymbol("brightness_6", autoMirror = false)
@@ -190,6 +192,7 @@ object Symbols {
     val SelectAll = MaterialSymbol("select_all", autoMirror = false)
     val Sell = MaterialSymbol("sell", autoMirror = false)
     val Send = MaterialSymbol("send", autoMirror = false)
+    val ArrowUpward = MaterialSymbol("arrow_upward", autoMirror = false)
     val Settings = MaterialSymbol("settings", autoMirror = false)
     val SettingsBackupRestore = MaterialSymbol("settings_backup_restore", autoMirror = false)
     val Share = MaterialSymbol("share", autoMirror = false)

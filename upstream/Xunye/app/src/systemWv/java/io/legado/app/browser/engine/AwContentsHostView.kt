@@ -3,6 +3,7 @@ package io.legado.app.browser.engine
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Rect
@@ -85,7 +86,11 @@ class AwContentsHostView @JvmOverloads constructor(
         BrowserPrivacyControls.applyToSettings(context, settings)
         BrowserPrivacyControls.applyForceZoom(context, settings)
         BrowserPrivacyControls.applyThirdPartyCookies(wv, context)
-        applyWebContentDarkMode(settings, chromePrefs.webContentDarkMode)
+        applyWebContentDarkMode(
+            settings,
+            chromePrefs.webContentDarkMode,
+            BrowserChromePrefs.isSystemNightMode(context),
+        )
 
         if (incognito) {
             settings.cacheMode = WebSettings.LOAD_NO_CACHE
@@ -107,12 +112,24 @@ class AwContentsHostView @JvmOverloads constructor(
 
     fun applyForceDarkOff() {
         val settings = webView?.settings ?: return
-        applyWebContentDarkMode(settings, BrowserChromePrefs.WEB_DARK_OFF)
+        applyWebContentDarkMode(settings, BrowserChromePrefs.WEB_DARK_OFF, nightMode = false)
     }
 
     fun applyWebContentDarkMode(mode: String) {
         val settings = webView?.settings ?: return
-        applyWebContentDarkMode(settings, mode)
+        applyWebContentDarkMode(
+            settings,
+            mode,
+            BrowserChromePrefs.isSystemNightMode(context),
+        )
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val prefs = BrowserChromePrefs(context)
+        if (prefs.webContentDarkMode == BrowserChromePrefs.WEB_DARK_AUTO) {
+            applyWebContentDarkMode(BrowserChromePrefs.WEB_DARK_AUTO)
+        }
     }
 
     fun applyTextZoom(percent: Int) {
@@ -412,33 +429,35 @@ class AwContentsHostView @JvmOverloads constructor(
             return value
         }
 
-        private fun applyWebContentDarkMode(settings: WebSettings, mode: String) {
+        /** SPEC-259: AUTO → ON/OFF via [nightMode]; never leave FORCE_DARK_AUTO. */
+        private fun applyWebContentDarkMode(
+            settings: WebSettings,
+            mode: String,
+            nightMode: Boolean,
+        ) {
             if (!WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING) &&
                 !WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)
             ) {
                 return
             }
-            when (mode) {
+            val resolved = BrowserChromePrefs.resolveWebContentDarkMode(mode, nightMode)
+            when (resolved) {
                 BrowserChromePrefs.WEB_DARK_ON -> {
                     if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
                         WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, true)
-                    } else if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
+                    }
+                    if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
                         @Suppress("DEPRECATION")
                         WebSettingsCompat.setForceDark(settings, WebSettingsCompat.FORCE_DARK_ON)
                     }
                 }
-                BrowserChromePrefs.WEB_DARK_OFF -> {
+                else -> {
                     if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
                         WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, false)
-                    } else if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
-                        @Suppress("DEPRECATION")
-                        WebSettingsCompat.setForceDark(settings, WebSettingsCompat.FORCE_DARK_OFF)
                     }
-                }
-                else -> {
                     if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
                         @Suppress("DEPRECATION")
-                        WebSettingsCompat.setForceDark(settings, WebSettingsCompat.FORCE_DARK_AUTO)
+                        WebSettingsCompat.setForceDark(settings, WebSettingsCompat.FORCE_DARK_OFF)
                     }
                 }
             }

@@ -75,6 +75,7 @@ fun TabletSettingsScreen(
     onNavigateToTranslation: () -> Unit,
     onNavigateToAiSummary: () -> Unit,
     onNavigateToAiPrompt: () -> Unit,
+    onNavigateToAiUsage: () -> Unit = {},
     onNavigateToAiFromTranslation: () -> Unit,
     onOpenClearBrowsingData: () -> Unit = {},
     onOpenBrowserPrivacy: () -> Unit = {},
@@ -193,6 +194,7 @@ fun TabletSettingsScreen(
                             onNavigateToTranslation = onNavigateToTranslation,
                             onNavigateToAiSummary = onNavigateToAiSummary,
                             onNavigateToAiPrompt = onNavigateToAiPrompt,
+                            onNavigateToAiUsage = onNavigateToAiUsage,
                         )
                         TabletSettingsPane.Translation -> TranslationConfigRouteScreen(
                             onBackClick = onBackClick,

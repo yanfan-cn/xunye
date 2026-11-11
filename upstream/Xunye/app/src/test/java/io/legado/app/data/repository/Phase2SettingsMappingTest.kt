@@ -24,7 +24,12 @@ class Phase2SettingsMappingTest {
                     maxCharsPerChunk = 12_345,
                     concurrentChunks = 3,
                     retryCount = 4,
-                )
+                    autoTranslateWebpage = true,
+                    autoTranslateJingdu = true,
+                ),
+                TranslationSettings(
+                    provider = TranslationConstants.PROVIDER_BERGAMOT,
+                ),
             ),
             toPrefMap = TranslationSettings::toPrefMap,
             fromPreferences = Preferences::toTranslationSettings,

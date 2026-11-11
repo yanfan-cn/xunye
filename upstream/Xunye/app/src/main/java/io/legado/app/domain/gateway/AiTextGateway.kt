@@ -16,6 +16,12 @@ sealed interface AiStreamEvent {
         val argumentsDelta: String?,
         val rawType: String
     ) : AiStreamEvent
+    /** SPEC-262: provider-reported token usage (optional). */
+    data class Usage(
+        val promptTokens: Int,
+        val completionTokens: Int,
+        val totalTokens: Int,
+    ) : AiStreamEvent
 }
 
 interface AiTextGateway {

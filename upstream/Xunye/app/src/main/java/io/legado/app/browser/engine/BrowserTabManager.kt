@@ -48,6 +48,7 @@ object BrowserTabManager {
     fun init(context: Context) {
         val app = context.applicationContext
         appContext = app
+        BrowserTabThumbnailStore.init(app)
         val chrome = BrowserChromePrefs(app)
         if (!chrome.restoreSessionOnLaunch) return
         val restored = BrowserTabPersist.load(app) ?: return
@@ -55,6 +56,17 @@ object BrowserTabManager {
         if (list.isEmpty()) return
         _tabs.value = list
         _activeId.value = active
+        // SPEC-257: restore thumbnails from disk; queue eager load for active URL.
+        BrowserTabThumbnailStore.preloadFromDisk(list.map { it.id })
+        val activeTab = list.firstOrNull { it.id == active }
+        val restoreUrl = activeTab?.url
+        if (activeTab != null &&
+            !activeTab.showHome &&
+            !restoreUrl.isNullOrBlank() &&
+            restoreUrl.startsWith("http")
+        ) {
+            BrowserSessionHolder.queueEagerLoad(activeTab.id, restoreUrl)
+        }
     }
 
     fun activeTab(): BrowserTab? = _tabs.value.firstOrNull { it.id == _activeId.value }

@@ -2,7 +2,8 @@
 <resources>
     <!-- SPEC-120: system dark splash / launcher plate -->
     <color name="splash_screen_background">#121212</color>
-    <color name="ic_launcher_background">#121212</color>
+    <!-- SPEC-253: same navy plate as day adaptive background -->
+    <color name="ic_launcher_background">#14305A</color>
 
     <color name="gr_theme_primary">#B1D18A</color>
     <color name="gr_theme_onPrimary">#1F3701</color>

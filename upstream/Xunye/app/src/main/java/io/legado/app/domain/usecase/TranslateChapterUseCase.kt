@@ -1,6 +1,5 @@
 package io.legado.app.domain.usecase
 
-import androidx.annotation.Keep
 import io.legado.app.data.entities.Book
 import io.legado.app.data.entities.BookChapter
 import io.legado.app.data.entities.TranslationCache
@@ -78,18 +77,25 @@ class TranslateChapterUseCase(
                 return@withContext Result.success(cachedTranslation)
             }
 
-            // SPEC-171: ML Kit translates the whole chapter once (internal chunking + one model load).
-            if (provider == TranslationConstants.PROVIDER_MLKIT) {
+            // SPEC-251: Bergamot/Foxlet on-device chapter translation.
+            if (provider == TranslationConstants.PROVIDER_BERGAMOT) {
                 onTranslateStarted()
                 onProgress(TranslationProgress(0, 1, null, emptySet()))
-                val mlResult = translateWithMlKit(originalContent, targetLanguage)
-                mlResult.onSuccess { translated ->
+                val bergResult = translateWithBergamot(originalContent, targetLanguage)
+                bergResult.onSuccess { translated ->
                     translationCacheGateway.writeTranslation(
                         book, bookChapter, targetLanguage, translated,
                     )
                     onProgress(TranslationProgress(1, 1, translated, setOf(0)))
                 }
-                return@withContext mlResult
+                return@withContext bergResult
+            }
+
+            // SPEC-249/251: ML Kit removed from product; keep path for legacy prefs that slip through.
+            if (provider == TranslationConstants.PROVIDER_MLKIT) {
+                return@withContext Result.failure(
+                    Exception("端上 ML Kit 已移除，请在翻译设置中改用 Bergamot（本机）"),
+                )
             }
 
             val contentHash = translationCacheGateway.computeContentHash(originalContent)
@@ -292,7 +298,7 @@ class TranslateChapterUseCase(
                     TranslationConstants.PROVIDER_GOOGLE ->
                         translateWithGoogle(chunk.content, targetLanguage).map { ChunkTranslation(it) }
                     TranslationConstants.PROVIDER_BAIDU ->
-                        translateWithBaidu(chunk.content, targetLanguage).map { ChunkTranslation(it) }
+                        Result.failure(Exception("百度翻译已移除，请改用 Bergamot（本机）"))
                     TranslationConstants.PROVIDER_APP_AI -> {
                         val allDictionaries = dictionaryGateway.getBookDictionaries(book).pairs
                         translateWithAiGateway(
@@ -332,42 +338,56 @@ class TranslateChapterUseCase(
         return aiProfileGateway.getTaskPreset(AiTaskType.TRANSLATE_CHAPTER)
     }
 
-    /** SPEC-171: on-device EN/JA → zh. Target must be Simplified Chinese. */
-    private suspend fun translateWithMlKit(text: String, targetLanguage: String): Result<String> {
-        val normalized = targetLanguage.lowercase().substringBefore('-')
-        if (normalized != "zh") {
-            return Result.failure(
-                Exception("端上翻译目前仅支持译为简体中文，请在翻译设置中将目标语言设为简体中文。"),
-            )
+    /** SPEC-251: short plaintext for webpage in-place batches (Google / App AI). */
+    suspend fun translatePlainText(text: String, targetLanguage: String): Result<String> =
+        withContext(Dispatchers.IO) {
+            when (val provider = translationSettingsGateway.currentSettings.provider) {
+                TranslationConstants.PROVIDER_GOOGLE -> translateWithGoogle(text, targetLanguage)
+                TranslationConstants.PROVIDER_APP_AI -> {
+                    val preset = resolveTranslationPreset()
+                        ?: return@withContext Result.failure(Exception("未配置应用 AI 翻译模型"))
+                    translateWithAiGateway(
+                        text = text,
+                        targetLanguage = targetLanguage,
+                        preset = preset,
+                        allDictionaries = emptyList(),
+                        relevantDictionaries = emptyList(),
+                        retryReason = null,
+                        onPreviewSnapshot = {},
+                        onThinkingChanged = {},
+                    ).map { it.text }
+                }
+                TranslationConstants.PROVIDER_BERGAMOT ->
+                    translateWithBergamot(text, targetLanguage)
+                else -> Result.failure(Exception("不支持的翻译提供方: $provider"))
+            }
         }
-        return io.legado.app.model.translation.MlKitChapterTranslator.translateToSimplifiedChinese(text)
+
+    /** SPEC-251: Bergamot chapter / plain text. Source guessed as English unless clearly CJK. */
+    private suspend fun translateWithBergamot(
+        text: String,
+        targetLanguage: String,
+    ): Result<String> = runCatching {
+        val source = when {
+            text.any { it in '\u3040'..'\u30ff' } -> "ja"
+            text.any { it in '\uac00'..'\ud7af' } -> "ko"
+            text.count { it in '\u4e00'..'\u9fff' } > text.length / 5 -> "zh"
+            else -> "en"
+        }
+        io.legado.app.model.translation.FoxletTranslateClient.translateText(
+            text = text,
+            sourceAppLang = source,
+            targetAppLang = targetLanguage,
+        )
     }
 
-    private suspend fun translateWithGoogle(text: String, targetLanguage: String): Result<String> {
-        val encodedText = URLEncoder.encode(text, Charsets.UTF_8.name())
-        val url =
-            "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=$targetLanguage&dj=1&dt=t&ie=UTF-8&q=$encodedText"
-        val response = okHttpClient.newCallStrResponse {
-            url(url)
-        }
-        return if (response.isSuccessful()) {
-            runCatching {
-                val json = GSON.fromJson(response.body, GoogleTranslateResponse::class.java)
-                json?.sentences?.mapNotNull { it.trans }?.joinToString("").orEmpty()
-            }.fold(
-                onSuccess = { translatedText ->
-                    if (translatedText.isNotEmpty()) {
-                        Result.success(translatedText)
-                    } else {
-                        Result.failure(Exception("Empty translation result"))
-                    }
-                },
-                onFailure = { Result.failure(it) }
-            )
-        } else {
-            Result.failure(Exception("HTTP ${response.code()}: ${response.message()}"))
-        }
-    }
+    /** SPEC-254: delegate to GoogleTranslateClient (POST/chunk/retry). */
+    private suspend fun translateWithGoogle(text: String, targetLanguage: String): Result<String> =
+        io.legado.app.model.translation.GoogleTranslateClient.translateText(
+            text = text,
+            targetAppLang = targetLanguage,
+            sourceAppLang = "auto",
+        )
 
     /** SPEC-048: Baidu free web translate (mainland-friendly). */
     private suspend fun translateWithBaidu(text: String, targetLanguage: String): Result<String> {
@@ -474,6 +494,7 @@ class TranslateChapterUseCase(
                         previewParser.feed(event.text).forEach(onPreviewSnapshot)
                     }
                     is AiStreamEvent.ToolCallDelta -> Unit
+                    is AiStreamEvent.Usage -> Unit
                 }
             }
             previewParser.finish().forEach(onPreviewSnapshot)
@@ -668,12 +689,3 @@ $terms
     }
 }
 
-@Keep
-private data class GoogleTranslateResponse(
-    val sentences: List<GoogleSentence>?
-)
-
-@Keep
-private data class GoogleSentence(
-    val trans: String?
-)
