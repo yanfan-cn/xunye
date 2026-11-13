@@ -3,7 +3,6 @@ package io.legado.app.ui.ai.chat
 import io.legado.app.ui.widget.components.icon.SymbolIcon
 import io.legado.app.ui.widget.components.icon.Symbols
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -58,6 +57,7 @@ fun AiGeneratedMessageContent(
     reasoningAutoExpandWhileStreaming: Boolean = false,
     onOpenBookInfo: (AiChatBookResultUi) -> Unit = {},
     onCopy: (() -> Unit)? = null,
+    onShare: (() -> Unit)? = null,
     onRegenerate: (() -> Unit)? = null,
     onSwitchBranch: ((direction: Int) -> Unit)? = null,
 ) {
@@ -92,9 +92,8 @@ fun AiGeneratedMessageContent(
     val webResults = mergedResults.filter { it.isBrowserOrigin() }
     val bookOnlyResults = mergedResults.filterNot { it.isBrowserOrigin() }
 
-    Column(
-        modifier = modifier.animateContentSize()
-    ) {
+    // SPEC-263: no animateContentSize — streaming / long chat switch janks hard.
+    Column(modifier = modifier) {
         if (showHeader) {
             AppText(
                 text = if (isUser) {
@@ -167,24 +166,11 @@ fun AiGeneratedMessageContent(
             )
         }
 
-        // SPEC-262: token usage under assistant reply.
-        if (isAssistant && !isStreaming) {
-            message.tokenUsage?.let { usage ->
-                Spacer(modifier = Modifier.height(6.dp))
-                AppText(
-                    text = if (usage.estimated) {
-                        stringResource(R.string.ai_tokens_estimated, usage.totalTokens)
-                    } else {
-                        stringResource(R.string.ai_tokens_used, usage.totalTokens)
-                    },
-                    style = LegadoTheme.typography.labelSmall,
-                    color = LegadoTheme.colorScheme.outline,
-                )
-            }
-        }
-
-        if (isAssistant && !isStreaming && (onCopy != null || onRegenerate != null)) {
-            Spacer(modifier = Modifier.height(4.dp))
+        // SPEC-263: token + actions on one row, same vertical center.
+        if (isAssistant && !isStreaming &&
+            (message.tokenUsage != null || onCopy != null || onShare != null || onRegenerate != null)
+        ) {
+            Spacer(modifier = Modifier.height(6.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -207,8 +193,22 @@ fun AiGeneratedMessageContent(
                         contentDescription = stringResource(R.string.next),
                         modifier = Modifier.size(28.dp)
                     )
+                    Spacer(modifier = Modifier.width(8.dp))
                 }
-                Spacer(modifier = Modifier.weight(1f))
+                AppText(
+                    text = message.tokenUsage?.let { usage ->
+                        if (usage.estimated) {
+                            stringResource(R.string.ai_tokens_estimated, usage.totalTokens)
+                        } else {
+                            stringResource(R.string.ai_tokens_used, usage.totalTokens)
+                        }
+                    }.orEmpty(),
+                    style = LegadoTheme.typography.labelSmall,
+                    color = LegadoTheme.colorScheme.outline,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
                 if (onRegenerate != null) {
                     SmallPlainButton(
                         onClick = onRegenerate,
@@ -222,6 +222,14 @@ fun AiGeneratedMessageContent(
                         onClick = onCopy,
                         icon = Symbols.ContentCopy,
                         contentDescription = stringResource(R.string.copy_text),
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+                if (onShare != null) {
+                    SmallPlainButton(
+                        onClick = onShare,
+                        icon = Symbols.Share,
+                        contentDescription = stringResource(R.string.share),
                         modifier = Modifier.size(32.dp)
                     )
                 }

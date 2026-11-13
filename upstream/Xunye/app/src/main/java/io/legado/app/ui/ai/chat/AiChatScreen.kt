@@ -10,9 +10,11 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import android.content.ClipData
+import android.content.Intent
 import android.content.res.Configuration
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -32,7 +34,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -60,13 +65,20 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -125,7 +137,12 @@ fun AiChatScreen(
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboard.current
+    val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     var draft by rememberSaveable { mutableStateOf("") }
+    // SPEC-263: sidebar search stays inert until user taps.
+    var sidebarSearchCanFocus by rememberSaveable { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val density = LocalDensity.current
     var topOverlayHeightPx by remember { mutableIntStateOf(0) }
@@ -139,7 +156,10 @@ fun AiChatScreen(
     } ?: state.conversations.firstOrNull { it.isSelected }
     val conversationTitle = currentConversation?.title?.takeIf { it.isNotBlank() }
         ?: stringResource(R.string.ai_chat)
+    // SPEC-266: after first model save, show configured model even if conversation name not yet synced.
     val modelName = currentConversation?.modelName?.takeIf { it.isNotBlank() }
+        ?: state.availableModels.firstOrNull { it.isSelected }?.modelName?.takeIf { it.isNotBlank() }
+        ?: state.availableModels.firstOrNull()?.modelName?.takeIf { it.isNotBlank() }
         ?: stringResource(R.string.ai_select_model)
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -186,6 +206,42 @@ fun AiChatScreen(
         }
     }
 
+    // SPEC-263: opening the drawer must not focus search / show IME.
+    LaunchedEffect(drawerState.currentValue) {
+        when (drawerState.currentValue) {
+            DrawerValue.Open -> {
+                sidebarSearchCanFocus = false
+                focusManager.clearFocus(force = true)
+                keyboardController?.hide()
+            }
+            DrawerValue.Closed -> {
+                sidebarSearchCanFocus = false
+                focusManager.clearFocus(force = true)
+                keyboardController?.hide()
+            }
+        }
+    }
+
+    val copyPlainText: (String) -> Unit = { raw ->
+        val plain = AiChatPlainText.stripMarkdown(raw)
+        scope.launch {
+            clipboard.setClipEntry(
+                ClipEntry(ClipData.newPlainText("content", plain))
+            )
+        }
+    }
+    val sharePlainText: (String) -> Unit = { raw ->
+        val plain = AiChatPlainText.stripMarkdown(raw)
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, plain)
+        }
+        context.startActivity(
+            Intent.createChooser(intent, context.getString(R.string.share))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    }
+
     val onSelectConversation: (String) -> Unit = { id ->
         onIntent(AiChatIntent.SelectConversation(id))
         if (!isLandscape) scope.launch { drawerState.close() }
@@ -200,24 +256,27 @@ fun AiChatScreen(
             alwaysDrawBehindBars = true,
             contentWindowInsets = WindowInsets(0)
         ) {
-            // Track whether user is near the bottom
-            val isNearBottom by remember {
-                derivedStateOf {
-                    val info = listState.layoutInfo
-                    val lastVisible = info.visibleItemsInfo.lastOrNull()
-                    lastVisible == null || lastVisible.index >= info.totalItemsCount - 3
-                }
+            // SPEC-264: stick uses pixel distance from bottom (index-only failed on tall streaming items).
+            val stickBottomThresholdPx = with(density) { 96.dp.roundToPx() }
+            val isNearBottom by remember(stickBottomThresholdPx) {
+                derivedStateOf { listState.isNearBottom(stickBottomThresholdPx) }
             }
-            val isAtBottom by remember {
-                derivedStateOf {
-                    val info = listState.layoutInfo
-                    val lastVisible = info.visibleItemsInfo.lastOrNull()
-                    lastVisible == null || lastVisible.index >= info.totalItemsCount - 1
-                }
+            val isAtBottom by remember(stickBottomThresholdPx) {
+                derivedStateOf { listState.isNearBottom(stickBottomThresholdPx) }
             }
 
-            // Stick-to-bottom: tracks whether user has scrolled away
             var shouldStickToBottom by remember { mutableStateOf(true) }
+            val unstickOnUserScrollUp = remember {
+                object : NestedScrollConnection {
+                    override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                        // Positive y = user dragging to reveal older content → stop follow.
+                        if (available.y > 0.5f) {
+                            shouldStickToBottom = false
+                        }
+                        return Offset.Zero
+                    }
+                }
+            }
 
             // Position immediately at the bottom once this conversation is laid out.
             LaunchedEffect(
@@ -241,20 +300,19 @@ fun AiChatScreen(
                 shouldStickToBottom = true
             }
 
-            // Update stick-to-bottom when user scrolls
-            LaunchedEffect(listState) {
-                snapshotFlow { listState.isScrollInProgress to isNearBottom }
-                    .collectLatest { (isScrolling, nearBottom) ->
-                        if (isScrolling) {
-                            shouldStickToBottom = nearBottom
-                        }
+            LaunchedEffect(listState, stickBottomThresholdPx) {
+                snapshotFlow {
+                    listState.isScrollInProgress to listState.isNearBottom(stickBottomThresholdPx)
+                }.collectLatest { (isScrolling, nearBottom) ->
+                    if (isScrolling) {
+                        shouldStickToBottom = nearBottom
+                    } else if (nearBottom) {
+                        shouldStickToBottom = true
                     }
+                }
             }
 
-            // SPEC-262: do NOT force stick when a new streaming message starts —
-            // only follow if the user is already near the bottom.
-
-            // Auto-scroll: when messages or streaming content changes, scroll to bottom if sticking
+            // Auto-scroll only while sticking; never fight an active user scroll.
             LaunchedEffect(
                 shouldStickToBottom,
                 state.messages.size,
@@ -264,11 +322,14 @@ fun AiChatScreen(
                 if (shouldStickToBottom && !listState.isScrollInProgress) {
                     val lastIndex = listState.layoutInfo.totalItemsCount - 1
                     if (lastIndex >= 0) {
-                        // Instant jump while streaming — animate fights user scroll.
                         listState.scrollToItem(lastIndex)
                     }
                 }
             }
+
+            // SPEC-264: tablet / wide layout ≥44dp horizontal content inset.
+            val messageHorizontalPadding =
+                if (configuration.screenWidthDp >= 600) 44.dp else 8.dp
 
             Box(
                 modifier = Modifier.fillMaxSize()
@@ -287,11 +348,13 @@ fun AiChatScreen(
                 // Message list
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .nestedScroll(unstickOnUserScrollUp),
                     contentPadding = PaddingValues(
-                        start = 8.dp,
+                        start = messageHorizontalPadding,
                         top = topContentPadding + 8.dp,
-                        end = 8.dp,
+                        end = messageHorizontalPadding,
                         bottom = bottomContentPadding + 8.dp
                     ),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -306,13 +369,8 @@ fun AiChatScreen(
                             message = message,
                             isStreaming = false,
                             onOpenBookInfo = onOpenBookInfo,
-                            onCopy = {
-                                scope.launch {
-                                    clipboard.setClipEntry(
-                                        ClipEntry(ClipData.newPlainText("content", message.content))
-                                    )
-                                }
-                            },
+                            onCopy = { copyPlainText(message.content) },
+                            onShare = { sharePlainText(message.content) },
                             onRegenerate = if (message.role == AiMessageRole.ASSISTANT && message.parentMessageId != null) {
                                 { onIntent(AiChatIntent.RegenerateMessage(message.id)) }
                             } else null,
@@ -342,7 +400,8 @@ fun AiChatScreen(
                                 message = streaming,
                                 isStreaming = true,
                                 onOpenBookInfo = onOpenBookInfo,
-                                onCopy = {}
+                                onCopy = {},
+                                onShare = null,
                             )
                         }
                     }
@@ -352,33 +411,46 @@ fun AiChatScreen(
                     }
                 }
 
-                // Draw behind both the floating input and the system navigation/IME area.
+                // SPEC-263: keep semi-transparent bottom gradient blur; nav inset
+                // continues the same gradient (no solid white placeholder bar).
                 Column(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
                 ) {
-                    Spacer(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(bottomContentPadding - systemBottomPadding)
-                            .background(
-                                Brush.verticalGradient(
-                                    colorStops = arrayOf(
-                                        0f to bottomGradientColor.copy(alpha = 0f),
-                                        0.58f to bottomGradientColor.copy(alpha = 0f),
-                                        0.82f to bottomGradientColor.copy(alpha = 0.64f),
-                                        1f to bottomGradientColor.copy(alpha = 0.88f)
+                    val fadeHeight = (bottomContentPadding - systemBottomPadding).coerceAtLeast(0.dp)
+                    if (fadeHeight > 0.dp) {
+                        Spacer(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(fadeHeight)
+                                .background(
+                                    Brush.verticalGradient(
+                                        colorStops = arrayOf(
+                                            0f to bottomGradientColor.copy(alpha = 0f),
+                                            0.58f to bottomGradientColor.copy(alpha = 0f),
+                                            0.82f to bottomGradientColor.copy(alpha = 0.40f),
+                                            1f to bottomGradientColor.copy(alpha = 0.55f)
+                                        )
                                     )
                                 )
-                            )
-                    )
-                    Spacer(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(systemBottomPadding)
-                            .background(bottomGradientColor.copy(alpha = 0.88f))
-                    )
+                        )
+                    }
+                    if (systemBottomPadding > 0.dp) {
+                        Spacer(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(systemBottomPadding)
+                                .background(
+                                    Brush.verticalGradient(
+                                        colorStops = arrayOf(
+                                            0f to bottomGradientColor.copy(alpha = 0.55f),
+                                            1f to bottomGradientColor.copy(alpha = 0.35f)
+                                        )
+                                    )
+                                )
+                        )
+                    }
                 }
 
                 // Bottom controls consume IME/navigation insets exactly once.
@@ -550,6 +622,8 @@ fun AiChatScreen(
                 conversations = state.conversations,
                 onSelectConversation = onSelectConversation,
                 onDeleteConversation = onDeleteConversation,
+                searchCanFocus = sidebarSearchCanFocus,
+                onSearchActivate = { sidebarSearchCanFocus = true },
                 modifier = Modifier
                     .weight(0.30f)
                     .fillMaxHeight(),
@@ -571,6 +645,8 @@ fun AiChatScreen(
                     conversations = state.conversations,
                     onSelectConversation = onSelectConversation,
                     onDeleteConversation = onDeleteConversation,
+                    searchCanFocus = sidebarSearchCanFocus,
+                    onSearchActivate = { sidebarSearchCanFocus = true },
                     modifier = Modifier.width(280.dp),
                     asDrawerSheet = true,
                 )
@@ -666,6 +742,8 @@ private fun ConversationPane(
     conversations: List<AiChatConversationUi>,
     onSelectConversation: (String) -> Unit,
     onDeleteConversation: (String) -> Unit,
+    searchCanFocus: Boolean,
+    onSearchActivate: () -> Unit,
     modifier: Modifier = Modifier,
     asDrawerSheet: Boolean = true,
 ) {
@@ -688,11 +766,13 @@ private fun ConversationPane(
                 .statusBarsPadding()
                 .padding(top = 8.dp)
         ) {
-            // SPEC-262: same capsule search as bookmarks/favorites.
+            // SPEC-262/263: bookmark-style search; no auto-focus / IME on open.
             io.legado.app.ui.browser.BrowserListSearchField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
                 placeholder = stringResource(R.string.search),
+                canFocus = searchCanFocus,
+                onActivate = onSearchActivate,
             )
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -795,49 +875,67 @@ private fun ChatMessageItem(
     isStreaming: Boolean,
     onOpenBookInfo: (AiChatBookResultUi) -> Unit,
     onCopy: () -> Unit,
+    onShare: (() -> Unit)? = null,
     onRegenerate: (() -> Unit)? = null,
     onSwitchBranch: ((direction: Int) -> Unit)? = null
 ) {
     val isUser = message.role == AiMessageRole.USER
     val isAssistant = message.role == AiMessageRole.ASSISTANT
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
-    ) {
-        if (isUser) {
-            GlassCard(
-                containerColor = LegadoTheme.colorScheme.secondaryContainer,
-                modifier = Modifier.fillMaxWidth(0.86f)
-            ) {
+    // SPEC-264: user bubble wraps text; max ~86% width (no forced full-width short bubbles).
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val maxBubbleWidth = maxWidth * 0.86f
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
+        ) {
+            if (isUser) {
+                GlassCard(
+                    containerColor = LegadoTheme.colorScheme.secondaryContainer,
+                    modifier = Modifier
+                        .widthIn(max = maxBubbleWidth)
+                        .wrapContentWidth(Alignment.End)
+                ) {
+                    AiGeneratedMessageContent(
+                        isUser = true,
+                        isAssistant = false,
+                        isStreaming = isStreaming,
+                        message = message,
+                        onOpenBookInfo = onOpenBookInfo,
+                        onCopy = onCopy,
+                        onShare = onShare,
+                        onRegenerate = onRegenerate,
+                        onSwitchBranch = onSwitchBranch,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+            } else {
                 AiGeneratedMessageContent(
-                    isUser = true,
-                    isAssistant = false,
+                    isUser = false,
+                    isAssistant = isAssistant,
                     isStreaming = isStreaming,
                     message = message,
                     onOpenBookInfo = onOpenBookInfo,
                     onCopy = onCopy,
+                    onShare = onShare,
                     onRegenerate = onRegenerate,
                     onSwitchBranch = onSwitchBranch,
-                    modifier = Modifier.padding(12.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
                 )
             }
-        } else {
-            AiGeneratedMessageContent(
-                isUser = false,
-                isAssistant = isAssistant,
-                isStreaming = isStreaming,
-                message = message,
-                onOpenBookInfo = onOpenBookInfo,
-                onCopy = onCopy,
-                onRegenerate = onRegenerate,
-                onSwitchBranch = onSwitchBranch,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp, vertical = 2.dp)
-            )
         }
     }
+}
+
+/** True when the last item is visible and within [thresholdPx] of the viewport bottom. */
+private fun LazyListState.isNearBottom(thresholdPx: Int): Boolean {
+    val info = layoutInfo
+    val lastVisible = info.visibleItemsInfo.lastOrNull() ?: return true
+    if (lastVisible.index < info.totalItemsCount - 1) return false
+    val bottom = lastVisible.offset + lastVisible.size
+    return bottom <= info.viewportEndOffset + thresholdPx
 }
 
 @Composable

@@ -15,6 +15,7 @@ import io.legado.app.domain.model.AiReasoningLevel
 import io.legado.app.domain.model.AiTaskType
 import io.legado.app.domain.model.AiToolApprovalState
 import io.legado.app.domain.model.AiToolCall
+import io.legado.app.domain.model.DeepSeekChatSupport
 import io.legado.app.domain.model.toolParts
 import io.legado.app.ui.ai.chat.AiChatBookResultUi
 import io.legado.app.ui.ai.chat.AiChatMessageUi
@@ -41,13 +42,21 @@ class AiChatGenerationUseCase(
         val preset = aiProfileGateway.getTaskPreset(AiTaskType.CHAT)
             ?: aiProfileGateway.getTaskPreset(AiTaskType.TRANSLATE_CHAPTER)
             ?: error("Please configure a default AI model first")
+        // SPEC-264: DeepSeek chat → Responses; Pro gets default web_search.
+        val model = DeepSeekChatSupport.withResponsesProtocol(preset.model)
+        val tools = buildList {
+            if (DeepSeekChatSupport.supportsOfficialWebSearch(model)) {
+                add(DeepSeekChatSupport.webSearchTool())
+            }
+            addAll(aiToolGateway.availableTools())
+        }
         return AiGenerateRequest(
-            model = preset.model,
+            model = model,
             messages = buildRequestMessages(userContent, history, conversationId),
             params = preset.params.copy(
                 reasoningLevel = reasoningLevel.resolveModelDefault(preset.params.reasoningLevel)
             ),
-            tools = aiToolGateway.availableTools()
+            tools = tools
         )
     }
 
@@ -196,25 +205,39 @@ class AiChatGenerationUseCase(
         val toolResults = tools.filter { it.output.isNotBlank() }.map {
             AiMessage(
                 role = AiMessageRole.TOOL,
-                content = it.output,
+                content = it.output.truncateToolOutput(),
                 toolCallId = it.toolCallId,
                 name = it.toolName
             )
         }
         return listOf(
-            AiMessage(role = AiMessageRole.ASSISTANT, content = content, toolCalls = toolCalls)
+            AiMessage(
+                role = AiMessageRole.ASSISTANT,
+                content = content.take(MAX_HISTORY_ASSISTANT_CHARS),
+                toolCalls = toolCalls
+            )
         ) + toolResults
     }
 
     private suspend fun buildSystemPrompt(conversationId: String? = null): String {
+        // SPEC-264: stop local-tool thrashing on general questions (see ~19k token screenshot).
         val base = """
             You are a helpful AI assistant inside a reading app.
-            Render answers in complete Markdown when structure helps.
-            Use local reading tools when the user asks about bookshelf books, current reading progress, chapters, bookmarks, reading statistics, existing AI notes, character profiles, relationships, world-book entries, or outlines.
-            For requests like summarizing, explaining, or continuing from the current chapter, use the local book and chapter tools before answering.
-            If a tool says content is missing or unavailable, state that limitation clearly and do not invent book content.
-            Save notes or summaries only when the user explicitly asks to save them.
-            Do not reveal hidden chain-of-thought. If reasoning is useful, provide a brief reasoning summary.
+            Answer clearly and briefly unless the user asks for more detail.
+            Render answers in Markdown when structure helps.
+
+            Local reading tools (bookshelf, chapters, bookmarks, notes, characters, outlines):
+            - Use ONLY when the user clearly asks about their local books, reading progress, chapters, bookmarks, notes, characters, or outlines.
+            - Do NOT use local tools for general knowledge, news, product facts, or open-web questions.
+            - Never guess bookUrl / chapter ids. Never call the same tool repeatedly on the same content.
+            - Prefer one precise tool call over many speculative calls.
+            - If a tool says content is missing, say so; do not invent book content.
+
+            If a server web_search tool is available, use it for realtime or web facts.
+            Do not substitute local bookshelf/bookmark search for web search.
+
+            Save notes or summaries only when the user explicitly asks.
+            Do not reveal hidden chain-of-thought; a brief reasoning summary is OK.
         """.trimIndent()
 
         if (conversationId == null) return base
@@ -231,8 +254,9 @@ class AiChatGenerationUseCase(
     }
 
     companion object {
-        const val MAX_HISTORY_MESSAGES = 12
-        const val MAX_TOOL_OUTPUT_CHARS = 8_000
+        const val MAX_HISTORY_MESSAGES = 10
+        const val MAX_TOOL_OUTPUT_CHARS = 2_500
+        const val MAX_HISTORY_ASSISTANT_CHARS = 6_000
     }
 }
 

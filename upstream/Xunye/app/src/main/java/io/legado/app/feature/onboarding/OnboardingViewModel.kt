@@ -3,9 +3,11 @@ package io.legado.app.feature.onboarding
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.legado.app.R
+import io.legado.app.browser.engine.NtpWallpaperStore
 import io.legado.app.domain.gateway.AppShellSettingsGateway
 import io.legado.app.domain.gateway.ThemeSettingsGateway
 import io.legado.app.help.config.LocalConfig
+import io.legado.app.help.config.ThemeConfigStore
 import io.legado.app.ui.theme.ChromeSurfaceStyle
 import io.legado.app.ui.theme.ChromeSurfaceStylePolicy
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -70,6 +72,8 @@ class OnboardingViewModel(
             _uiState.update { it.copy(page = it.page + 1) }
         } else {
             LocalConfig.privacyPolicyOk = true
+            // SPEC-266: seed NTP wallpaper once from theme (dark→neon / light→mist).
+            NtpWallpaperStore(appCtx).seedDefaultIfNeeded(ThemeConfigStore.isNightTheme)
             _effects.tryEmit(OnboardingEffect.NavigateHome)
         }
     }

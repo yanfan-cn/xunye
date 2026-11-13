@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!--App-->
-    <string name="app_name">巡页Xunye</string>
+    <string name="app_name">巡页</string>
     <string name="app_name_a">Legado·A</string>
     <string name="receiving_shared_label">Legado·search</string>
     <string name="tip_perm_request_storage">Legado needs storage access to find and read books. Please go "App Settings" to allow "Storage Permission".</string>
@@ -959,6 +959,8 @@
     <string name="title_hide">Hide</string>
     <string name="add_to_group">Add to Group</string>
     <string name="save_image">Save image</string>
+    <!-- SPEC-266 -->
+    <string name="reader_all_photos">All photos</string>
     <string name="no_default_path">No default path</string>
     <string name="change_group">Group settings</string>
     <string name="view_toc">Chapters</string>

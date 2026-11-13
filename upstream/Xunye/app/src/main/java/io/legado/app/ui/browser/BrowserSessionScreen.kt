@@ -84,7 +84,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.currentStateAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -2349,6 +2348,7 @@ fun BrowserSessionScreen(
             } else if (!tabletEmbedded) {
                 // Floating chrome — phone only (SPEC-011 2A); tablet uses top chrome (SPEC-018).
                 // SPEC-022 B / SPEC-242: auto-hide via layout offset (keep glass composed).
+                // SPEC-266: do NOT .alpha() liquid-glass chrome over AwContents (RenderThread risk).
                 // SPEC-243: skip compose entirely in toolbox fullscreen (no blank placeholder).
                 // SPEC-045: translate prompt sits above the bottom chrome (phone) / content bottom (tablet).
                 if (!browserFullscreen) {
@@ -2369,7 +2369,6 @@ fun BrowserSessionScreen(
                             val h = phoneBottomChromeHeightPx.coerceAtLeast(1)
                             IntOffset(0, ((1f - bottomChromeProgress) * h).roundToInt())
                         }
-                        .alpha(bottomChromeProgress)
                         .padding(horizontal = BrowserUiTokens.PagePaddingH)
                         .padding(bottom = floatingBottomPad)
                         .padding(top = floatingChromeTopGap),

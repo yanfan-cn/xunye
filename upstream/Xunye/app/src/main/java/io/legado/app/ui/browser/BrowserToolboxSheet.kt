@@ -163,6 +163,8 @@ fun Modifier.toolboxPanelSurface(
         enableLens = false,
         // SPEC-107 1A: match NTP home-menu readable overlay alphas.
         readableOverlay = true,
+        // SPEC-265: no edge Highlight on toolbox glass.
+        showHighlight = false,
     )
 
 @Composable
@@ -186,6 +188,7 @@ private fun Modifier.toolboxCellSurface(): Modifier {
         showShadow = false,
         enableLens = false,
         overlayAlpha = overlay,
+        showHighlight = false,
     )
 }
 
@@ -203,6 +206,7 @@ private fun Modifier.toolboxWebBgSurface(): Modifier {
         showShadow = false,
         enableLens = false,
         readableOverlay = true,
+        showHighlight = false,
     )
 }
 

@@ -9,8 +9,6 @@ import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
@@ -505,7 +503,7 @@ private fun BrowserHomeTabBody(
                 )
             }
         }
-        // SPEC-257: tablet 净读 enter/exit — slide-up like phone Activity feel (no hard cut).
+        // SPEC-257/266: tablet 净读 enter/exit — slide only (no fade over liquid-glass reader chrome).
         val overlayUrl = embeddedReaderUrl
         val showEmbeddedReader = embeddedKind != null && !overlayUrl.isNullOrBlank()
         var exitKind by remember { mutableStateOf<TabletEmbeddedReaderKind?>(null) }
@@ -520,11 +518,11 @@ private fun BrowserHomeTabBody(
             enter = slideInVertically(
                 animationSpec = tween(280, easing = FastOutSlowInEasing),
                 initialOffsetY = { it / 5 },
-            ) + fadeIn(animationSpec = tween(180)),
+            ),
             exit = slideOutVertically(
                 animationSpec = tween(220, easing = FastOutSlowInEasing),
                 targetOffsetY = { it / 6 },
-            ) + fadeOut(animationSpec = tween(160)),
+            ),
         ) {
             val kind = exitKind
             val url = exitUrl

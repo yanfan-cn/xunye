@@ -884,9 +884,14 @@ fun BrowserNtpScreen(
             }
 
             // SPEC-049/161: dual-row capsule — same colors in incognito.
+            // SPEC-265: 赛博/霓虹深色预置下胶囊内文案/icon 用浅色，避免发灰难辨。
             val fieldBg = colors.fieldBg
-            val textColor = colors.primaryText
-            val secondary = colors.secondaryText
+            val textColor = if (darkPresetVisible) Color.White else colors.primaryText
+            val secondary = if (darkPresetVisible) {
+                Color.White.copy(alpha = 0.88f)
+            } else {
+                colors.secondaryText
+            }
             val capsuleShape = RoundedCornerShape(28.dp)
             // SPEC-072: liquid glass 0.4/0.35; filled = 1.
             val capsuleFill = ntpGlassOverlayAlpha()

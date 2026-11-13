@@ -25,6 +25,7 @@ import io.legado.app.utils.GSON
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
@@ -37,6 +38,7 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class AiChatViewModel(
@@ -199,10 +201,26 @@ class AiChatViewModel(
                         isSelected = model.id == currentId,
                     )
                 }
-                _uiState.update {
-                    it.copy(
+                val selected = options.firstOrNull { it.isSelected } ?: options.firstOrNull()
+                _uiState.update { state ->
+                    val syncedConversations = if (selected != null && selected.modelName.isNotBlank()) {
+                        state.conversations.map { conv ->
+                            if (conv.id == state.currentConversationId) {
+                                conv.copy(
+                                    providerName = selected.providerName,
+                                    modelName = selected.modelName,
+                                )
+                            } else {
+                                conv
+                            }
+                        }.toImmutableList()
+                    } else {
+                        state.conversations
+                    }
+                    state.copy(
                         availableModels = options.toImmutableList(),
                         currentModelProfileId = currentId,
+                        conversations = syncedConversations,
                     )
                 }
             }
@@ -247,38 +265,40 @@ class AiChatViewModel(
                 .filterNotNull()
                 .flatMapLatest { aiChatGateway.observeSelectedMessages(it) }
                 .collect { messages ->
-                    lastMessages = messages.map { msg ->
-                        val parts = AiMessagePartJson.decode(msg.partsJson)
-                        val usage = parts.usagePart()
-                        AiChatMessageUi(
-                            id = msg.id,
-                            role = msg.role,
-                            parts = parts.toImmutableList(),
-                            content = parts.textContent(),
-                            reasoning = parts.reasoningContent(),
-                            toolTrace = parts.toolTraceText(),
-                            createdAt = msg.createdAt,
-                            thinkingDuration = msg.thinkingDuration,
-                            bookResults = parts.bookResults().toImmutableList(),
-                            branchIndex = msg.branchIndex,
-                            totalBranches = 1, // will be updated below
-                            parentMessageId = msg.parentMessageId,
-                            tokenUsage = usage?.let {
-                                AiChatTokenUsageUi(
-                                    promptTokens = it.promptTokens,
-                                    completionTokens = it.completionTokens,
-                                    totalTokens = it.totalTokens,
-                                    estimated = it.estimated,
-                                )
-                            },
-                        )
+                    // SPEC-263: decode/map off main to cut switch-jank on long chats.
+                    val mapped = withContext(Dispatchers.Default) {
+                        messages.map { msg ->
+                            val parts = AiMessagePartJson.decode(msg.partsJson)
+                            val usage = parts.usagePart()
+                            AiChatMessageUi(
+                                id = msg.id,
+                                role = msg.role,
+                                parts = parts.toImmutableList(),
+                                content = parts.textContent(),
+                                reasoning = parts.reasoningContent(),
+                                toolTrace = parts.toolTraceText(),
+                                createdAt = msg.createdAt,
+                                thinkingDuration = msg.thinkingDuration,
+                                bookResults = parts.bookResults().toImmutableList(),
+                                branchIndex = msg.branchIndex,
+                                totalBranches = 1, // will be updated below
+                                parentMessageId = msg.parentMessageId,
+                                tokenUsage = usage?.let {
+                                    AiChatTokenUsageUi(
+                                        promptTokens = it.promptTokens,
+                                        completionTokens = it.completionTokens,
+                                        totalTokens = it.totalTokens,
+                                        estimated = it.estimated,
+                                    )
+                                },
+                            )
+                        }
                     }
-                    // Update totalBranches for assistant messages with parent (batch query)
                     val conversationId = currentConversationId.value
                     val branchCounts = if (conversationId != null) {
                         runCatching { aiChatGateway.getBranchCounts(conversationId) }.getOrNull()
                     } else null
-                    lastMessages = lastMessages.map { msg ->
+                    lastMessages = mapped.map { msg ->
                         if (msg.role == AiMessageRole.ASSISTANT && msg.parentMessageId != null) {
                             val count = branchCounts?.get(msg.parentMessageId) ?: 1
                             msg.copy(totalBranches = count)

@@ -57,10 +57,11 @@ object AiProviderPresets {
         get() = items.filter { it.showInWizard }
 
     val items = listOf(
+        // SPEC-264: Responses so Pro can use official server web_search.
         AiProviderPreset(
             id = "deepseek",
             name = "DeepSeek",
-            protocol = AiProtocol.OPENAI_CHAT_COMPLETIONS,
+            protocol = AiProtocol.OPENAI_RESPONSES,
             baseUrl = "https://api.deepseek.com",
             modelsUrl = "https://api.deepseek.com/models",
             modelName = "DeepSeek V4.1 Flash",
@@ -483,7 +484,12 @@ data class AiAvailableModel(
 data class AiToolDefinition(
     val name: String,
     val description: String,
-    val inputSchema: Map<String, Any?>
+    val inputSchema: Map<String, Any?> = emptyMap(),
+    /**
+     * SPEC-264: when set (e.g. `web_search`), serialize as a built-in server tool
+     * `{ "type": serverToolType }` instead of a function tool.
+     */
+    val serverToolType: String? = null,
 )
 
 @Keep

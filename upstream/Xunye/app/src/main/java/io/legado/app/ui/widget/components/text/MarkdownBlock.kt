@@ -110,6 +110,9 @@ private fun parseMarkdown(content: String): MarkdownParseResult {
  * Markdown renderer using JetBrains intellij-markdown AST parser.
  * Parses on a background thread to avoid blocking the UI during streaming.
  * Uses AppText for proper theme integration.
+ *
+ * SPEC-263: never sync-parse on the composition thread (first frame used to
+ * call parseMarkdown on main and jank when switching long AI chats).
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @Composable
@@ -122,7 +125,7 @@ fun MarkdownBlock(
     onImageClick: (String) -> Unit = {},
     onImageLongClick: (String) -> Unit = {},
 ) {
-    var data by remember { mutableStateOf(parseMarkdown(content)) }
+    var data by remember { mutableStateOf<MarkdownParseResult?>(null) }
 
     val updatedContent by rememberUpdatedState(content)
     LaunchedEffect(Unit) {
@@ -142,13 +145,23 @@ fun MarkdownBlock(
         )
     ) {
         ProvideTextStyle(style) {
-            Column(modifier = modifier.padding(horizontal = 4.dp)) {
-                data.astTree.children.fastForEach { child ->
-                    MarkdownNode(
-                        node = child,
-                        content = data.content,
-                        onClickLink = onClickLink,
-                    )
+            val parsed = data
+            if (parsed == null) {
+                // Plain fallback until background parse finishes — avoids blank flash.
+                AppText(
+                    text = content,
+                    style = style,
+                    modifier = modifier.padding(horizontal = 4.dp),
+                )
+            } else {
+                Column(modifier = modifier.padding(horizontal = 4.dp)) {
+                    parsed.astTree.children.fastForEach { child ->
+                        MarkdownNode(
+                            node = child,
+                            content = parsed.content,
+                            onClickLink = onClickLink,
+                        )
+                    }
                 }
             }
         }

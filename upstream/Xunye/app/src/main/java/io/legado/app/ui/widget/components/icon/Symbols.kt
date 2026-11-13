@@ -128,6 +128,8 @@ object Symbols {
     val Home = MaterialSymbol("home", autoMirror = false)
     val Image = MaterialSymbol("image", autoMirror = false)
     val ImageSearch = MaterialSymbol("image_search", autoMirror = false)
+    /** SPEC-266: 净读看图「全部照片」入口。 */
+    val PhotoLibrary = MaterialSymbol("photo_library", autoMirror = false)
     val Info = MaterialSymbol("info", autoMirror = false)
     val InsertDriveFile = MaterialSymbol("draft", autoMirror = false)
     val KeyboardArrowDown = MaterialSymbol("keyboard_arrow_down", autoMirror = false)

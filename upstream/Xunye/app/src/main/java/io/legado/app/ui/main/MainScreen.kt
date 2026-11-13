@@ -350,6 +350,8 @@ fun MainScreen(
     }
 
     fun handleMainDestinationClick(index: Int, destination: MainDestination) {
+        // SPEC-266: ignore stale indices under rapid tap / destination list churn.
+        if (index !in destinations.indices) return
         if (
             destination == MainDestination.Bookshelf &&
             pagerState.currentPage == index &&
@@ -359,7 +361,13 @@ fun MainScreen(
             return
         }
         coroutineScope.launch {
-            pagerState.animateScrollToPage(index)
+            // SPEC-266: piled animateScrollToPage on fast bottom-bar taps can race the pager;
+            // snap while a scroll is already in flight.
+            if (pagerState.isScrollInProgress) {
+                pagerState.scrollToPage(index)
+            } else {
+                pagerState.animateScrollToPage(index)
+            }
         }
     }
     LaunchedEffect(destinations) {

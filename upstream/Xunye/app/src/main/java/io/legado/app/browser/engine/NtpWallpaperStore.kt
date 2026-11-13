@@ -20,7 +20,7 @@ object NtpWallpaperIds {
     /** SPEC-239: dark tech / cyberpunk presets. */
     const val CYBER = "cyber"
     const val NEON = "neon"
-    /** SPEC-223: default preset wallpaper for new installs. */
+    /** SPEC-223/266: fallback when unset; first-launch seed uses [defaultForTheme]. */
     const val DEFAULT = MIST
 
     val builtins = listOf(
@@ -33,6 +33,9 @@ object NtpWallpaperIds {
 
     /** SPEC-239: dark image presets need light logo / shortcut labels. */
     fun isDarkPreset(id: String) = id == CYBER || id == NEON
+
+    /** SPEC-266: new-user default — dark → neon, light → mist. */
+    fun defaultForTheme(isDark: Boolean): String = if (isDark) NEON else MIST
 
     fun label(id: String) = when (id) {
         // SPEC-239: rename only — still vertical gradients.
@@ -63,6 +66,15 @@ class NtpWallpaperStore(context: Context) {
         set(value) {
             chromePrefs.ntpWallpaperId = value
         }
+
+    /**
+     * SPEC-266: only when onboarding finishes and no wallpaper id was ever written.
+     * Does not override an existing preference (including upgrades that already stored an id).
+     */
+    fun seedDefaultIfNeeded(isDark: Boolean) {
+        if (chromePrefs.hasNtpWallpaperId) return
+        chromePrefs.ntpWallpaperId = NtpWallpaperIds.defaultForTheme(isDark)
+    }
 
     fun userIds(): List<String> = chromePrefs.ntpUserWallpaperIds.filter { fileFor(it).isFile }
 

@@ -104,7 +104,8 @@ class AiToolRepository(
 
     private fun searchBooks(args: JsonObject): String {
         val query = args.string("query").orEmpty().trim()
-        val limit = args.int("limit", 8).coerceIn(1, 20)
+        // SPEC-264: tighter defaults to cut chat token blow-ups.
+        val limit = args.int("limit", 5).coerceIn(1, 8)
         val books = bookDao.all
             .asSequence()
             .filter { it.isReadable() }
@@ -127,8 +128,8 @@ class AiToolRepository(
             book.toSummaryMap() + mapOf(
                 "bookUrl" to book.bookUrl,
                 "kind" to book.kind,
-                "intro" to book.getDisplayIntro(),
-                "remark" to book.remark,
+                "intro" to book.getDisplayIntro().orEmpty().take(240),
+                "remark" to book.remark.orEmpty().take(120),
                 "latestChapterTitle" to book.latestChapterTitle,
                 "lastCheckCount" to book.lastCheckCount,
                 "canUpdate" to book.canUpdate

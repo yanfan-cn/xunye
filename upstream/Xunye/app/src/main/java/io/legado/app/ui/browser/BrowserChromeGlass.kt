@@ -178,6 +178,8 @@ fun Modifier.browserControlLiquidGlass(
     enableLens: Boolean = true,
     /** SPEC-099: optional surface tint alpha (toolbox panel / denser cells). */
     overlayAlpha: Float? = null,
+    /** SPEC-265: toolbox can disable edge Highlight stroke. */
+    showHighlight: Boolean = true,
 ): Modifier {
     val isDark = LegadoTheme.isDark
     val surface = LegadoTheme.colorScheme.surface
@@ -224,7 +226,11 @@ fun Modifier.browserControlLiquidGlass(
                 lens(24.dp.toPx(), 24.dp.toPx())
             }
         },
-        highlight = { Highlight.Default },
+        highlight = if (showHighlight) {
+            { Highlight.Default }
+        } else {
+            null
+        },
         shadow = {
             if (showShadow) {
                 Shadow(

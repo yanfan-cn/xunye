@@ -136,6 +136,10 @@ class BrowserChromePrefs(context: Context) {
             ?: NtpWallpaperIds.DEFAULT
         set(value) = prefs.edit().putString(KEY_NTP_WALLPAPER_ID, value).apply()
 
+    /** SPEC-266: true only after an id was explicitly written (seed or user pick). */
+    val hasNtpWallpaperId: Boolean
+        get() = prefs.contains(KEY_NTP_WALLPAPER_ID)
+
     /** SPEC-158: user-imported wallpaper ids, one per line. */
     var ntpUserWallpaperIds: List<String>
         get() = prefs.getString(KEY_NTP_USER_WALLS, "").orEmpty()

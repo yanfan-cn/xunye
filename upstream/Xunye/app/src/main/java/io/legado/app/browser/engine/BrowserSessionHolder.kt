@@ -16,6 +16,9 @@ object BrowserSessionHolder {
     private const val TAG = "BrowserSessionHolder"
     private const val MAX_PARKED = 8
 
+    /** SPEC-266: serialize attach/park/destroy under rapid tab / NTP switches. */
+    private val sessionLock = Any()
+
     private data class SessionSlot(
         val host: AwContentsHostView,
         val client: BrowserAwContentsClient,
@@ -56,7 +59,7 @@ object BrowserSessionHolder {
         incognito: Boolean,
         clientFactory: () -> BrowserAwContentsClient,
         sessionKey: String,
-    ): Pair<AwContentsHostView, BrowserAwContentsClient> {
+    ): Pair<AwContentsHostView, BrowserAwContentsClient> = synchronized(sessionLock) {
         // SPEC-124 diag: attachTo branch timing.
         val t0 = android.os.SystemClock.uptimeMillis()
         val current = active
@@ -139,7 +142,9 @@ object BrowserSessionHolder {
     }
 
     fun markLoaded() {
-        active?.hasLoadedInitialUrl = true
+        synchronized(sessionLock) {
+            active?.hasLoadedInitialUrl = true
+        }
     }
 
     /** SPEC-149: 只读查询——活跃槽位属于 [key] 时返回其宿主；key 为 null 不校验。 */
@@ -182,12 +187,14 @@ object BrowserSessionHolder {
      * SPEC-120: detach + pause active host without destroying (tab switch / NTP park).
      */
     fun parkActive() {
-        val key = sessionKey ?: return
-        val slot = active ?: return
-        parkSlot(key, slot)
-        active = null
-        sessionKey = null
-        Log.i(TAG, "parked active session key=$key")
+        synchronized(sessionLock) {
+            val key = sessionKey ?: return
+            val slot = active ?: return
+            parkSlot(key, slot)
+            active = null
+            sessionKey = null
+            Log.i(TAG, "parked active session key=$key")
+        }
     }
 
     /**
@@ -231,21 +238,25 @@ object BrowserSessionHolder {
     }
 
     fun destroyKey(key: String) {
-        if (sessionKey == key) {
-            destroyActiveOnly()
-            return
+        synchronized(sessionLock) {
+            if (sessionKey == key) {
+                destroyActiveOnly()
+                return
+            }
+            parked.remove(key)?.let { destroySlot(it) }
         }
-        parked.remove(key)?.let { destroySlot(it) }
     }
 
     fun destroy() {
-        destroyActiveOnly()
-        val keys = parked.keys.toList()
-        keys.forEach { k ->
-            parked.remove(k)?.let { destroySlot(it) }
+        synchronized(sessionLock) {
+            destroyActiveOnly()
+            val keys = parked.keys.toList()
+            keys.forEach { k ->
+                parked.remove(k)?.let { destroySlot(it) }
+            }
+            // runCatching: JVM unit tests have no android.util.Log mock.
+            runCatching { Log.i(TAG, "all session hosts destroyed") }
         }
-        // runCatching: JVM unit tests have no android.util.Log mock.
-        runCatching { Log.i(TAG, "all session hosts destroyed") }
     }
 
     private fun destroyActiveOnly() {

@@ -100,7 +100,9 @@ class WebViewModel(
         }
         if (refetchAfterSuccess) {
             execute {
-                val url = intent!!.getStringExtra("url")!!
+                // SPEC-266: avoid NPE when verification Intent lost extras under rapid leave.
+                val url = intent?.getStringExtra("url")?.takeIf { it.isNotBlank() }
+                    ?: return@execute
                 val source = bookSourceRepository.getBookSource(sourceOrigin)
                 html = AnalyzeUrl(
                     url,

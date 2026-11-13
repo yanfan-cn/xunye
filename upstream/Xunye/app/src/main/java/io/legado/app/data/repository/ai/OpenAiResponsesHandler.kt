@@ -285,13 +285,19 @@ internal fun List<AiMessage>.toOpenAiResponsesInput(): List<Map<String, Any?>> {
 }
 
 internal fun List<AiToolDefinition>.toOpenAiResponsesTools(): List<Map<String, Any?>> {
-    return map {
-        mapOf(
-            "type" to "function",
-            "name" to it.name,
-            "description" to it.description,
-            "parameters" to it.inputSchema
-        )
+    return map { tool ->
+        val serverType = tool.serverToolType
+        if (!serverType.isNullOrBlank()) {
+            // SPEC-264: built-in server tools such as DeepSeek web_search.
+            mapOf("type" to serverType)
+        } else {
+            mapOf(
+                "type" to "function",
+                "name" to tool.name,
+                "description" to tool.description,
+                "parameters" to tool.inputSchema
+            )
+        }
     }
 }
 
