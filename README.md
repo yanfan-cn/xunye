@@ -12,7 +12,7 @@
 - **ABI**：仅 arm64-v8a
 - **系统要求**
   - **默认 Aloha 包**（捆绑 Chromium）：**Android 10+**（API 29）。Aloha Core / 现行 Chromium 按上游以 Android 10 为最低支持。
-  - **无 Aloha 旁路包**（`systemWv`，使用系统 WebView）：现行包按工程 **minSdk 28**，需 **Android 9+**；体积更小，无捆绑 Chromium，能力与默认包不完全等同（见 SPEC-222）。早期未升 minSdk 的包曾可在 Android 8.1 安装使用，**不以现行包为准**。
+  - **无 Aloha 旁路包**（`systemWv`，使用系统 WebView）：按当前工程 **minSdk 28**，需 **Android 9+**；体积更小，无捆绑 Chromium，能力与默认包不完全等同（见 SPEC-222）。
 - **版本**：Debug 见 `upstream/Xunye/app/version.properties`；正式 Release 见 `version-release.properties`（当前正式线自 **1.0.x**）。可在 [Releases](https://github.com/yanfan-cn/xunye/releases) 下载已签名 APK。
 
 底栏三个主入口：**浏览器**、**阅读列表**、**我的**。
