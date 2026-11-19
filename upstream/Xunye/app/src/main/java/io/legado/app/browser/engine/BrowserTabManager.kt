@@ -49,8 +49,12 @@ object BrowserTabManager {
         val app = context.applicationContext
         appContext = app
         BrowserTabThumbnailStore.init(app)
+        BrowserSessionHolder.init(app)
         val chrome = BrowserChromePrefs(app)
-        if (!chrome.restoreSessionOnLaunch) return
+        if (!chrome.restoreSessionOnLaunch) {
+            BrowserTabWebStateStore.clear(app)
+            return
+        }
         val restored = BrowserTabPersist.load(app) ?: return
         val (list, active) = restored
         if (list.isEmpty()) return
@@ -65,7 +69,14 @@ object BrowserTabManager {
             !restoreUrl.isNullOrBlank() &&
             restoreUrl.startsWith("http")
         ) {
-            BrowserSessionHolder.queueEagerLoad(activeTab.id, restoreUrl)
+            // SPEC-267: prefer saved navigation Bundle (keeps back/forward); else loadUrl.
+            val navState = BrowserTabWebStateStore.load(app, activeTab.id)
+            if (navState != null) {
+                BrowserSessionHolder.queueRestoreState(activeTab.id, navState)
+                BrowserSessionHolder.queueEagerLoad(activeTab.id, restoreUrl)
+            } else {
+                BrowserSessionHolder.queueEagerLoad(activeTab.id, restoreUrl)
+            }
         }
     }
 
@@ -181,6 +192,7 @@ object BrowserTabManager {
         }
         BrowserTabEmbeddedReaderStore.clear(tabId)
         BrowserTabThumbnailStore.remove(tabId)
+        appContext?.let { BrowserTabWebStateStore.remove(it, tabId) }
         BrowserSessionHolder.destroyKey(tabId)
         if (list.size <= 1) {
             // SPEC-234: 不允许 0 标签——关最后一个后保底一个主页标签。
@@ -208,6 +220,7 @@ object BrowserTabManager {
         BrowserSessionHolder.captureActiveThumbnail()
         BrowserTabThumbnailStore.clear()
         BrowserTabEmbeddedReaderStore.clearAll()
+        appContext?.let { BrowserTabWebStateStore.clear(it) }
         BrowserSessionHolder.destroy()
         val home = BrowserTab(newId(), null, "新标签页", false, showHome = true)
         _tabs.value = listOf(home)
@@ -228,6 +241,7 @@ object BrowserTabManager {
         closedIds.forEach {
             BrowserTabEmbeddedReaderStore.clear(it)
             BrowserTabThumbnailStore.remove(it)
+            appContext?.let { ctx -> BrowserTabWebStateStore.remove(ctx, it) }
             BrowserSessionHolder.destroyKey(it)
         }
         val next = list.filter { it.incognito != incognito }
@@ -246,8 +260,19 @@ object BrowserTabManager {
         persist()
     }
 
-    fun updateActiveMeta(url: String, title: String) {
+    /**
+     * Update URL/title for the active tab.
+     * SPEC-267: when [sessionKey] is set, ignore callbacks that no longer match the active
+     * tab / holder session (stops tablet rapid-switch from writing A’s URL onto B and
+     * later `loadUrl`-clobbering parked pages).
+     */
+    fun updateActiveMeta(url: String, title: String, sessionKey: String? = null) {
         val id = _activeId.value
+        if (sessionKey != null && sessionKey != id) return
+        if (sessionKey != null) {
+            val holderKey = BrowserSessionHolder.sessionKey
+            if (holderKey != null && holderKey != sessionKey) return
+        }
         _tabs.update { list ->
             list.map {
                 if (it.id == id) {
@@ -330,8 +355,9 @@ object BrowserTabManager {
     fun isWebSessionShowing(tab: BrowserTab?): Boolean =
         tab != null && !tab.showHome && !tab.url.isNullOrBlank()
 
-    /** Label for tabs grid / strip. */
-    fun tabDisplayTitle(tab: BrowserTab): String = displayTitle(tab.title, tab.url, "新标签页")
+    /** Label for tabs grid / strip. SPEC-267: NTP (`showHome`) always「新标签页」. */
+    fun tabDisplayTitle(tab: BrowserTab): String =
+        if (tab.showHome) "新标签页" else displayTitle(tab.title, tab.url, "新标签页")
 
     /**
      * SPEC-125: idle address bar / chrome label — page title, else host, else fallback.
@@ -343,6 +369,7 @@ object BrowserTabManager {
         val ctx = appContext ?: return
         if (!BrowserChromePrefs(ctx).restoreSessionOnLaunch) {
             BrowserTabPersist.clear(ctx)
+            BrowserTabWebStateStore.clear(ctx)
             return
         }
         BrowserTabPersist.save(ctx, _tabs.value, _activeId.value)

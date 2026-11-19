@@ -87,7 +87,8 @@ class BrowserTabManagerTest {
         assertTrue(parked.showHome)
         assertEquals("https://example.com/path", parked.url)
         assertEquals("Example Domain", parked.title)
-        assertEquals("Example Domain", BrowserTabManager.tabDisplayTitle(parked))
+        // SPEC-267: showHome tab label is always「新标签页」(url/title kept for restore).
+        assertEquals("新标签页", BrowserTabManager.tabDisplayTitle(parked))
         // SPEC-097: parked NTP must not count as web session (main bottom bar).
         assertTrue(!BrowserTabManager.isWebSessionShowing(parked))
         // SPEC-100: release is deferred until exit animation; explicit call is safe.
@@ -149,5 +150,29 @@ class BrowserTabManagerTest {
             "example.com",
             BrowserTabManager.pageDisplayLabel(null, "https://www.example.com/x"),
         )
+    }
+
+    @Test
+    fun updateActiveMetaIgnoresMismatchedSessionKey() {
+        // SPEC-267: stale page callbacks must not clobber the newly active tab.
+        BrowserTabManager.openUrlInActive("https://a.example/")
+        val aId = BrowserTabManager.activeTabId.value
+        BrowserTabManager.updateActiveMeta("https://a.example/", "A", sessionKey = aId)
+        val bId = BrowserTabManager.openNewTab(url = "https://b.example/", select = true)
+        BrowserTabManager.updateActiveMeta("https://a.example/stale", "STALE", sessionKey = aId)
+        val b = BrowserTabManager.tabs.value.first { it.id == bId }
+        assertEquals("https://b.example/", b.url)
+        assertTrue(b.title != "STALE")
+        BrowserTabManager.updateActiveMeta("https://b.example/ok", "B-OK", sessionKey = bId)
+        assertEquals("https://b.example/ok", BrowserTabManager.activeTab()!!.url)
+        assertEquals("B-OK", BrowserTabManager.activeTab()!!.title)
+    }
+
+    @Test
+    fun tabDisplayTitleOnHomeIsNewTab() {
+        BrowserTabManager.openUrlInActive("https://example.com/", omniboxLabel = "ex")
+        BrowserTabManager.updateActiveMeta("https://example.com/", "Example")
+        BrowserTabManager.clearActiveToNtp()
+        assertEquals("新标签页", BrowserTabManager.tabDisplayTitle(BrowserTabManager.activeTab()!!))
     }
 }

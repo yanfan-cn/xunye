@@ -447,7 +447,8 @@ private fun BrowserHomeTabBody(
                         if (!addressFocused) {
                             address = idleTabletAddress(tab)
                         }
-                        BrowserTabManager.updateActiveMeta(pageUrl, title)
+                        // SPEC-267: bind meta updates to this tab id (stop cross-tab clobber).
+                        BrowserTabManager.updateActiveMeta(pageUrl, title, sessionKey = tab.id)
                     },
                     tabletEmbedded = true,
                     onBindActions = { sessionActions = it },
@@ -678,7 +679,12 @@ private fun PhoneBrowserHome(
                         onOpenReader = onOpenReader,
                         onOpenMangaReader = onOpenMangaReader,
                         onPageMeta = { pageUrl, title ->
-                            BrowserTabManager.updateActiveMeta(pageUrl, title)
+                            // SPEC-267: bind meta updates to this tab id.
+                            BrowserTabManager.updateActiveMeta(
+                                pageUrl,
+                                title,
+                                sessionKey = sessionKey,
+                            )
                         },
                         tabletEmbedded = false,
                     )

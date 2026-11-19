@@ -79,6 +79,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.currentStateAsState
@@ -1250,9 +1251,12 @@ fun BrowserSessionScreen(
         }
     }
 
-    /** SPEC-156: 有可处理应用才弹 Chooser；否则不弹空板。 */
-    fun openExternalAppChooser(url: String) {
-        runCatching {
+    /**
+     * SPEC-156/268: 有可处理应用才弹 Chooser；空/失败静默返回 false（由调用方跟 fallback）。
+     * @return true 若已弹出选择器
+     */
+    fun openExternalAppChooser(url: String): Boolean {
+        return runCatching {
             val intent = if (url.startsWith("intent:", ignoreCase = true)) {
                 Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
             } else {
@@ -1262,16 +1266,28 @@ fun BrowserSessionScreen(
                 intent,
                 PackageManager.MATCH_DEFAULT_ONLY,
             )
-            if (resolved.isEmpty()) {
-                showSnack("没有可打开此链接的应用")
-                return
-            }
+            if (resolved.isEmpty()) return false
             context.startActivity(
                 Intent.createChooser(intent, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             )
-        }.onFailure {
-            showSnack("无法打开此链接")
-        }
+            true
+        }.getOrDefault(false)
+    }
+
+    /** SPEC-268: 未打开选择器时跟 intent browser_fallback_url，减少再点一次。 */
+    fun followExternalFallback(url: String) {
+        val fallback = BrowserUrlPolicy.intentBrowserFallbackUrl(url) ?: return
+        loadExternalUrl(fallback)
+    }
+
+    fun handleExternalAppUrl(url: String, hasUserGesture: Boolean) {
+        if (hasUserGesture && openExternalAppChooser(url)) return
+        followExternalFallback(url)
+    }
+
+    fun handleExternalBlocked(url: String) {
+        showSnack("已阻止打开其它应用")
+        followExternalFallback(url)
     }
 
     fun clearVideoCustomViewUi() {
@@ -1316,6 +1332,18 @@ fun BrowserSessionScreen(
                     act.toggleSystemBar(true)
                 }
             }
+        }
+    }
+
+    // SPEC-267: bridge Activity pause/resume to AwContents (gesture app-switch crash).
+    LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) {
+        if (BrowserSessionHolder.sessionKey == resolvedSessionKey) {
+            BrowserSessionHolder.pauseActiveForAppBackground()
+        }
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        if (BrowserSessionHolder.sessionKey == resolvedSessionKey) {
+            BrowserSessionHolder.resumeActiveForAppForeground()
         }
     }
 
@@ -1969,8 +1997,8 @@ fun BrowserSessionScreen(
                         isAdBlockEnabled = { shield.adBlockEnabled },
                         isPopupBlockEnabled = { shield.blockPopups },
                         isExternalBlockEnabled = { shield.blockExternalApps },
-                        onExternalBlocked = { showSnack("已阻止打开其它应用") },
-                        onExternalAppOpen = { openExternalAppChooser(it) },
+                        onExternalBlocked = { handleExternalBlocked(it) },
+                        onExternalAppOpen = { url, gesture -> handleExternalAppUrl(url, gesture) },
                         onPopupBlocked = { showSnack("已阻止弹出窗口") },
                         isPickModeActive = { pickMode },
                         onConsoleBlockPick = { payload ->
@@ -2244,9 +2272,14 @@ fun BrowserSessionScreen(
                         appliedNavEpoch = navEpoch
                         syncIdleAddress(initialTitle, initialUrl)
                     } else {
-                        // SPEC-125: restored after park — if tab URL moved (open from NTP),
-                        // must load; switchTo with same URL keeps parked page.
-                        if (initialUrl.isNotBlank() && initialUrl != client.lastUrl) {
+                        // SPEC-125/267: restored after park — trust live lastUrl unless
+                        // navEpoch advanced (explicit openUrl) or host has no URL yet.
+                        // Never loadUrl from contaminated tab meta (tablet rapid switch).
+                        val last = client.lastUrl
+                        val forceLoad = initialUrl.isNotBlank() &&
+                            initialUrl != last &&
+                            (navEpoch > appliedNavEpoch || last.isBlank())
+                        if (forceLoad) {
                             armHttpsFallback(initialOmniboxLabel, initialUrl)
                             client.lastError = null
                             pendingForcedUrl = initialUrl
@@ -2256,10 +2289,12 @@ fun BrowserSessionScreen(
                         } else {
                             pendingForcedUrl = null
                             appliedNavEpoch = navEpoch
-                            syncIdleAddress(
-                                client.lastTitle.ifBlank { initialTitle.orEmpty() },
-                                client.lastUrl.ifBlank { initialUrl },
-                            )
+                            val pageUrl = last.ifBlank { initialUrl }
+                            val pageTitle = client.lastTitle.ifBlank { initialTitle.orEmpty() }
+                            syncIdleAddress(pageTitle, pageUrl)
+                            if (last.isNotBlank() && last != initialUrl) {
+                                onPageMeta?.invoke(pageUrl, pageTitle)
+                            }
                         }
                     }
                 },

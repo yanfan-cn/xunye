@@ -48,10 +48,10 @@ class BrowserAwContentsClient(
     private val isExternalBlockEnabled: () -> Boolean = { true },
     private val onExternalBlocked: ((String) -> Unit)? = null,
     /**
-     * SPEC-156: open a custom-scheme / intent:// URL in another app (host shows
-     * chooser only when resolvable). Called only for user gestures.
+     * SPEC-156/268: custom-scheme / intent:// — host may show chooser (gesture +
+     * resolvable) or silently follow browser_fallback_url. Second arg is user gesture.
      */
-    private val onExternalAppOpen: ((String) -> Unit)? = null,
+    private val onExternalAppOpen: ((String, Boolean) -> Unit)? = null,
     private val onPopupBlocked: (() -> Unit)? = null,
     private val onConsoleBlockPick: ((String) -> Unit)? = null,
     /** SPEC-134: when true, block all URL navigations (pick-to-block mode). */
@@ -168,13 +168,10 @@ class BrowserAwContentsClient(
                 onStatus("已阻止打开其它应用")
                 return true
             }
-            // SPEC-156: 仅用户手势才尝试打开；自动跳转静默消费，避免空 Chooser 刷屏。
-            if (request.hasUserGesture()) {
-                Log.i(TAG, "external-open (gesture) $url")
-                onExternalAppOpen?.invoke(url)
-            } else {
-                Log.i(TAG, "external-skip (no gesture) $url")
-            }
+            // SPEC-156/268: 宿主决定 chooser / 静默 fallback；无手势不弹选择器。
+            val gesture = request.hasUserGesture()
+            Log.i(TAG, if (gesture) "external-open (gesture) $url" else "external-fallback-only $url")
+            onExternalAppOpen?.invoke(url, gesture)
             return true
         }
         if (onOverrideUrl?.invoke(url) == true) return true

@@ -246,9 +246,20 @@ class AwContentsHostView @JvmOverloads constructor(
         BrowserPrivacyControls.applyToSettings(context, settings)
     }
 
+    /** SPEC-267: Chromium requires Chrome_UIThread; never call from Default/IO. */
+    private fun runOnChromeUi(block: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            block()
+        } else {
+            post(block)
+        }
+    }
+
     fun loadUrl(url: String) {
         // SPEC-242: 浏览导航不再按站抬桌面 UA；播放端见 BrowserVideoMedia.playbackUserAgent。
-        awContents?.loadUrl(url) ?: Log.w(TAG, "loadUrl before attach: $url")
+        runOnChromeUi {
+            awContents?.loadUrl(url) ?: Log.w(TAG, "loadUrl before attach: $url")
+        }
     }
 
     fun loadDataWithBaseURL(
@@ -258,14 +269,25 @@ class AwContentsHostView @JvmOverloads constructor(
         encoding: String,
         historyUrl: String?,
     ) {
-        awContents?.loadDataWithBaseURL(baseUrl, data, mimeType, encoding, historyUrl)
+        runOnChromeUi {
+            awContents?.loadDataWithBaseURL(baseUrl, data, mimeType, encoding, historyUrl)
+        }
     }
 
     fun evaluateJavaScript(script: String, callback: BrowserJsCallback?) {
-        awContents?.evaluateJavaScript(
-            script,
-            callback?.let { c -> Callback<String> { value -> c.onResult(value) } },
-        )
+        // SPEC-267 hotfix: gesture switch crash — evaluateJavaScript from DefaultDispatch
+        // → FATAL Must be called on Chrome_UIThread (see gesture_crash.txt).
+        runOnChromeUi {
+            runCatching {
+                awContents?.evaluateJavaScript(
+                    script,
+                    callback?.let { c -> Callback<String> { value -> c.onResult(value) } },
+                ) ?: callback?.onResult(null)
+            }.onFailure {
+                Log.w(TAG, "evaluateJavaScript: ${it.message}")
+                callback?.onResult(null)
+            }
+        }
     }
 
     /** SPEC-064: save current page as MHTML (.mht), Chrome/Edge offline style. */
@@ -376,8 +398,29 @@ class AwContentsHostView @JvmOverloads constructor(
         )
     }
 
-    fun onHostResume() { awContents?.onResume() }
-    fun onHostPause() { awContents?.onPause() }
+    fun onHostResume() {
+        runOnChromeUi { awContents?.onResume() }
+    }
+
+    fun onHostPause() {
+        runOnChromeUi { awContents?.onPause() }
+    }
+
+    /** SPEC-267: current document URL after restoreState / navigation. */
+    fun currentUrl(): String? {
+        val gurl = runCatching { awContents?.url }.getOrNull() ?: return null
+        return gurl.getValidSpecOrEmpty().takeIf { it.isNotBlank() }
+    }
+
+    /** SPEC-267: persist back/forward list across process death. */
+    fun saveNavigationState(): Bundle? {
+        val bundle = Bundle()
+        val ok = runCatching { awContents?.saveState(bundle) == true }.getOrDefault(false)
+        return bundle.takeIf { ok && !it.isEmpty }
+    }
+
+    fun restoreNavigationState(state: Bundle): Boolean =
+        runCatching { awContents?.restoreState(state) == true }.getOrDefault(false)
 
     /**
      * SPEC-053: downscaled still of the current page for the tab grid.

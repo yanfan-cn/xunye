@@ -1,6 +1,7 @@
 package io.legado.app.browser.engine
 
 import android.content.Context
+import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
@@ -32,6 +33,13 @@ object BrowserSessionHolder {
     private val parked = linkedMapOf<String, SessionSlot>()
 
     @Volatile
+    private var appContext: Context? = null
+
+    /** SPEC-267: true while Activity is backgrounded — skip resume until foreground. */
+    @Volatile
+    private var appBackgrounded: Boolean = false
+
+    @Volatile
     var sessionKey: String? = null
         private set
 
@@ -48,10 +56,55 @@ object BrowserSessionHolder {
     /** SPEC-257: sessionKey → URL to load as soon as the host is created (cold restore). */
     private val eagerLoadUrls = ConcurrentHashMap<String, String>()
 
+    /** SPEC-267: sessionKey → AwContents/WebView navigation Bundle for cold restore. */
+    private val eagerRestoreStates = ConcurrentHashMap<String, Bundle>()
+
+    /** SPEC-267: application context for persisting navigation state on park. */
+    fun init(context: Context) {
+        appContext = context.applicationContext
+        BrowserTabWebStateStore.init(context.applicationContext)
+    }
+
     /** SPEC-257: queue restore URL so [attachTo] can start network before Compose settles. */
     fun queueEagerLoad(sessionKey: String, url: String) {
         if (sessionKey.isBlank() || url.isBlank()) return
         eagerLoadUrls[sessionKey] = url
+    }
+
+    /** SPEC-267: queue navigation Bundle so [attachTo] can restore back/forward without loadUrl. */
+    fun queueRestoreState(sessionKey: String, state: Bundle) {
+        if (sessionKey.isBlank()) return
+        eagerRestoreStates[sessionKey] = state
+    }
+
+    /**
+     * SPEC-267: Activity ON_PAUSE — pause active AwContents (parked already paused).
+     * Missing this caused release crashes when gesture-switching back onto a live page.
+     */
+    fun pauseActiveForAppBackground() {
+        synchronized(sessionLock) {
+            appBackgrounded = true
+            val key = sessionKey
+            val slot = active
+            if (key != null && slot != null) {
+                persistNavState(key, slot.host)
+            }
+            slot?.host?.let { host ->
+                try {
+                    host.onHostPause()
+                } catch (t: Throwable) {
+                    Log.w(TAG, "pauseActiveForAppBackground: ${t.message}")
+                }
+            }
+        }
+    }
+
+    /** SPEC-267: Activity ON_RESUME — resume active host if still attached. */
+    fun resumeActiveForAppForeground() {
+        synchronized(sessionLock) {
+            appBackgrounded = false
+            active?.host?.let { resumeHost(it) }
+        }
     }
 
     fun attachTo(
@@ -121,17 +174,38 @@ object BrowserSessionHolder {
         val newClient = clientFactory()
         newHost.attach(newClient, incognito = incognito)
         container.addView(newHost)
-        // SPEC-257: start restore navigation immediately after attach (before Compose chrome).
-        val eager = eagerLoadUrls.remove(sessionKey)
+        // SPEC-267/257: prefer navigation Bundle restore (keeps back/forward); else eager loadUrl.
+        val restoreBundle = eagerRestoreStates.remove(sessionKey)
+            ?: appContext?.let { BrowserTabWebStateStore.load(it, sessionKey) }
         var loaded = false
-        if (!eager.isNullOrBlank()) {
-            newClient.lastUrl = eager
-            runCatching { newHost.loadUrl(eager) }
+        if (restoreBundle != null && newHost.restoreNavigationState(restoreBundle)) {
             loaded = true
-            Log.i(TAG, "eager loadUrl key=$sessionKey url=$eager")
+            val restoredUrl = newHost.currentUrl().orEmpty()
+                .ifBlank { eagerLoadUrls.remove(sessionKey).orEmpty() }
+            if (restoredUrl.isNotBlank()) {
+                newClient.lastUrl = restoredUrl
+            }
+            Log.i(TAG, "restoreState key=$sessionKey url=$restoredUrl")
+            eagerLoadUrls.remove(sessionKey)
+        } else {
+            val eager = eagerLoadUrls.remove(sessionKey)
+            if (!eager.isNullOrBlank()) {
+                newClient.lastUrl = eager
+                runCatching { newHost.loadUrl(eager) }
+                loaded = true
+                Log.i(TAG, "eager loadUrl key=$sessionKey url=$eager")
+            }
         }
         active = SessionSlot(newHost, newClient, hasLoadedInitialUrl = loaded)
         this.sessionKey = sessionKey
+        if (!appBackgrounded) {
+            resumeHost(newHost)
+        } else {
+            try {
+                newHost.onHostPause()
+            } catch (_: Throwable) {
+            }
+        }
         Log.i(TAG, "created session host key=$sessionKey")
         Log.i(
             TAG,
@@ -270,6 +344,7 @@ object BrowserSessionHolder {
     }
 
     private fun parkSlot(key: String, slot: SessionSlot) {
+        persistNavState(key, slot.host)
         try {
             slot.host.onHostPause()
         } catch (_: Throwable) {
@@ -284,16 +359,24 @@ object BrowserSessionHolder {
         trimParked()
     }
 
+    private fun persistNavState(key: String, host: AwContentsHostView) {
+        val ctx = appContext ?: return
+        val bundle = host.saveNavigationState() ?: return
+        BrowserTabWebStateStore.save(ctx, key, bundle)
+    }
+
     private fun trimParked() {
         while (parked.size > MAX_PARKED) {
             val oldest = parked.entries.firstOrNull() ?: break
             parked.remove(oldest.key)
             destroySlot(oldest.value)
+            appContext?.let { BrowserTabWebStateStore.remove(it, oldest.key) }
             Log.i(TAG, "evicted parked session key=${oldest.key}")
         }
     }
 
     private fun resumeHost(host: AwContentsHostView) {
+        if (appBackgrounded) return
         try {
             host.visibility = View.VISIBLE
         } catch (_: Throwable) {

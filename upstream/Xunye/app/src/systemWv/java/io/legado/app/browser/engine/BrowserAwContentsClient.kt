@@ -36,7 +36,8 @@ class BrowserAwContentsClient(
     private val isPopupBlockEnabled: () -> Boolean = { true },
     private val isExternalBlockEnabled: () -> Boolean = { true },
     private val onExternalBlocked: ((String) -> Unit)? = null,
-    private val onExternalAppOpen: ((String) -> Unit)? = null,
+    /** SPEC-268: (url, hasUserGesture) — host may chooser or silent fallback. */
+    private val onExternalAppOpen: ((String, Boolean) -> Unit)? = null,
     private val onPopupBlocked: (() -> Unit)? = null,
     private val onConsoleBlockPick: ((String) -> Unit)? = null,
     private val isPickModeActive: () -> Boolean = { false },
@@ -143,12 +144,12 @@ class BrowserAwContentsClient(
                         onStatus("已阻止打开其它应用")
                         return true
                     }
-                    if (request.hasGesture()) {
-                        Log.i(TAG, "external-open (gesture) $url")
-                        onExternalAppOpen?.invoke(url)
-                    } else {
-                        Log.i(TAG, "external-skip (no gesture) $url")
-                    }
+                    val gesture = request.hasGesture()
+                    Log.i(
+                        TAG,
+                        if (gesture) "external-open (gesture) $url" else "external-fallback-only $url",
+                    )
+                    onExternalAppOpen?.invoke(url, gesture)
                     return true
                 }
                 if (onOverrideUrl?.invoke(url) == true) return true

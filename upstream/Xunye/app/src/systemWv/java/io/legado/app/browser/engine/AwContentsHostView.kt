@@ -157,9 +157,20 @@ class AwContentsHostView @JvmOverloads constructor(
         BrowserPrivacyControls.applyThirdPartyCookies(wv, context)
     }
 
+    /** SPEC-267: WebView/Chromium APIs must run on the main thread. */
+    private fun runOnChromeUi(block: () -> Unit) {
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            block()
+        } else {
+            post(block)
+        }
+    }
+
     fun loadUrl(url: String) {
         // SPEC-242: 浏览导航不再按站抬桌面 UA；播放端见 BrowserVideoMedia.playbackUserAgent。
-        webView?.loadUrl(url) ?: Log.w(TAG, "loadUrl before attach: $url")
+        runOnChromeUi {
+            webView?.loadUrl(url) ?: Log.w(TAG, "loadUrl before attach: $url")
+        }
     }
 
     fun loadDataWithBaseURL(
@@ -169,12 +180,17 @@ class AwContentsHostView @JvmOverloads constructor(
         encoding: String,
         historyUrl: String?,
     ) {
-        webView?.loadDataWithBaseURL(baseUrl, data, mimeType, encoding, historyUrl)
+        runOnChromeUi {
+            webView?.loadDataWithBaseURL(baseUrl, data, mimeType, encoding, historyUrl)
+        }
     }
 
     fun evaluateJavaScript(script: String, callback: BrowserJsCallback?) {
-        webView?.evaluateJavascript(script) { value ->
-            callback?.onResult(unwrapJsString(value))
+        // SPEC-267 hotfix: never evaluateJavascript off the main thread.
+        runOnChromeUi {
+            webView?.evaluateJavascript(script) { value ->
+                callback?.onResult(unwrapJsString(value))
+            } ?: callback?.onResult(null)
         }
     }
 
@@ -273,11 +289,26 @@ class AwContentsHostView @JvmOverloads constructor(
     }
 
     fun onHostResume() {
-        webView?.onResume()
+        runOnChromeUi { webView?.onResume() }
     }
 
     fun onHostPause() {
-        webView?.onPause()
+        runOnChromeUi { webView?.onPause() }
+    }
+
+    /** SPEC-267: current document URL after restoreState / navigation. */
+    fun currentUrl(): String? = webView?.url?.takeIf { it.isNotBlank() }
+
+    /** SPEC-267: persist back/forward list across process death. */
+    fun saveNavigationState(): android.os.Bundle? {
+        val wv = webView ?: return null
+        val bundle = android.os.Bundle()
+        return if (wv.saveState(bundle) != null && !bundle.isEmpty) bundle else null
+    }
+
+    fun restoreNavigationState(state: android.os.Bundle): Boolean {
+        val wv = webView ?: return false
+        return wv.restoreState(state) != null
     }
 
     fun capturePreviewAsync(maxWidthPx: Int = 360, onDone: (Bitmap?) -> Unit) {

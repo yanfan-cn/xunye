@@ -1,4 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">巡页</string>
     <string name="receiving_shared_label">巡页·搜索</string>
+    <string name="receiving_shared_favorite_label">巡页·收藏</string>
 </resources>

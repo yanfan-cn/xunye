@@ -331,7 +331,7 @@
             android:enableOnBackInvokedCallback="true"
             android:configChanges="locale|layoutDirection|uiMode|orientation|screenSize|screenLayout"
             android:hardwareAccelerated="true" />
-        <!-- 鏂囧瓧澶勭悊 -->
+        <!-- SPEC-267: 巡页·搜索（系统分享 / 文字处理） -->
         <activity
             android:name=".receiver.SharedReceiverActivity"
             android:exported="true"
@@ -352,6 +352,21 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
+        <!-- SPEC-267: 巡页·收藏（同 Activity，分享面板第二入口） -->
+        <activity-alias
+            android:name=".receiver.SharedFavoriteReceiver"
+            android:exported="true"
+            android:label="@string/receiving_shared_favorite_label"
+            android:targetActivity=".receiver.SharedReceiverActivity"
+            android:theme="@style/AppTheme.Transparent">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity-alias>
         <!-- 涓€閿鍏?-->
         <activity
             android:name=".ui.association.OnLineImportActivity"

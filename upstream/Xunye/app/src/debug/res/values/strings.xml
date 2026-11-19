@@ -1,4 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">巡页</string>
-    <string name="receiving_shared_label">巡页·search</string>
+    <string name="receiving_shared_label">Xunye·Search</string>
+    <string name="receiving_shared_favorite_label">Xunye·Favorite</string>
 </resources>

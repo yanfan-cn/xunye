@@ -89,6 +89,7 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
@@ -119,6 +120,7 @@ import io.legado.app.R
 import io.legado.app.browser.engine.BingWallpaperClient
 import io.legado.app.browser.engine.BrowseStore
 import io.legado.app.browser.engine.BrowserChromePrefs
+import io.legado.app.browser.engine.NtpCapsuleInk
 import io.legado.app.browser.engine.NtpWallpaperIds
 import io.legado.app.browser.engine.NtpWallpaperStore
 import io.legado.app.browser.engine.BrowserNtpNews
@@ -884,13 +886,17 @@ fun BrowserNtpScreen(
             }
 
             // SPEC-049/161: dual-row capsule — same colors in incognito.
-            // SPEC-265: 赛博/霓虹深色预置下胶囊内文案/icon 用浅色，避免发灰难辨。
+            // SPEC-269: 胶囊内墨色跟胶囊底，不跟壁纸；赛博/霓虹浅玻璃用深色字（纠正 SPEC-265）。
             val fieldBg = colors.fieldBg
-            val textColor = if (darkPresetVisible) Color.White else colors.primaryText
-            val secondary = if (darkPresetVisible) {
-                Color.White.copy(alpha = 0.88f)
+            val useDarkCapsuleInk = NtpCapsuleInk.useDarkInk(
+                fieldBgLuminance = fieldBg.luminance(),
+                darkPresetWallpaper = darkPresetVisible,
+            )
+            val textColor = if (useDarkCapsuleInk) NtpDarkWordmark else Color.White
+            val secondary = if (useDarkCapsuleInk) {
+                NtpDarkWordmark.copy(alpha = 0.62f)
             } else {
-                colors.secondaryText
+                Color.White.copy(alpha = 0.88f)
             }
             val capsuleShape = RoundedCornerShape(28.dp)
             // SPEC-072: liquid glass 0.4/0.35; filled = 1.
