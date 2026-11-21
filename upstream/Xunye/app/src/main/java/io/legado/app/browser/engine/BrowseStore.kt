@@ -186,6 +186,20 @@ class BrowseStore(context: Context) {
         return if (sinceMs <= 0L) list.size else list.count { it.at >= sinceMs }
     }
 
+    /** SPEC-271: 备份快照——收藏 / 文件夹 / 历史一次性读取。 */
+    fun snapshot(): BrowseStoreBackup.Snapshot = BrowseStoreBackup.Snapshot(
+        history = history(),
+        bookmarks = bookmarks(),
+        folders = folders(),
+    )
+
+    /** SPEC-271: 恢复合并结果整表写回（仅备份恢复调用）。 */
+    fun applySnapshot(snapshot: BrowseStoreBackup.Snapshot) {
+        writeEntries(KEY_HISTORY, snapshot.history.take(MAX_HISTORY))
+        writeEntries(KEY_BOOKMARKS, snapshot.bookmarks.take(MAX_BOOKMARKS))
+        writeFolders(snapshot.folders)
+    }
+
     /** SPEC-236: 多层文件夹——新建在 [parentId] 目录下；父不存在时回落根目录。 */
     fun addFolder(name: String, parentId: String = ""): Folder {
         val parent = parentId.trim().takeIf { it.isNotEmpty() }
@@ -362,8 +376,9 @@ class BrowseStore(context: Context) {
         private const val KEY_BOOKMARKS = "bookmarks"
         private const val KEY_FOLDERS = "folders"
         private const val KEY_BOOKMARK_SORT = "bookmark_sort"
-        private const val MAX_HISTORY = 100
-        /** SPEC-236: 100 → 1000，批量导入不被截断。 */
-        private const val MAX_BOOKMARKS = 1000
+        /** SPEC-271: 与 `BrowseStoreBackup` 共享同一上限（备份合并按此截断）。 */
+        internal const val MAX_HISTORY = BrowseStoreBackup.MAX_HISTORY
+        /** SPEC-236: 100 → 1000，批量导入不被截断；SPEC-271 备份恢复同上限。 */
+        internal const val MAX_BOOKMARKS = BrowseStoreBackup.MAX_BOOKMARKS
     }
 }

@@ -71,6 +71,8 @@ object BackupConfig {
     private const val coverConfigKey = "coverConfig"
     private const val localBookKey = "localBook"
     private const val mangaKey = "mangaConfig"
+    /** SPEC-271: 浏览器收藏（网页书签）/收藏文件夹/浏览历史。 */
+    private const val browserBrowseKey = "browserBrowse"
 
     //数据库忽略key
     private const val dbKeyBookmark = "bookmark"
@@ -151,7 +153,8 @@ object BackupConfig {
         PreferKey.showRss,
         PreferKey.threadCount,
         localBookKey,
-        mangaKey
+        mangaKey,
+        browserBrowseKey
     )
 
     //配置忽略标题
@@ -164,7 +167,8 @@ object BackupConfig {
         appCtx.getString(R.string.show_rss),
         appCtx.getString(R.string.thread_count),
         appCtx.getString(R.string.local_book),
-        appCtx.getString(R.string.manga_config)
+        appCtx.getString(R.string.manga_config),
+        appCtx.getString(R.string.browser_browse_backup)
     )
 
     //备份忽略key
@@ -177,7 +181,8 @@ object BackupConfig {
         PreferKey.showRss,
         PreferKey.threadCount,
         localBookKey,
-        mangaKey
+        mangaKey,
+        browserBrowseKey
     )
 
     //备份忽略标题
@@ -190,7 +195,8 @@ object BackupConfig {
         appCtx.getString(R.string.show_rss),
         appCtx.getString(R.string.thread_count),
         appCtx.getString(R.string.local_book),
-        appCtx.getString(R.string.manga_config)
+        appCtx.getString(R.string.manga_config),
+        appCtx.getString(R.string.browser_browse_backup)
     )
 
     //阅读配置
@@ -468,6 +474,14 @@ object BackupConfig {
         get() = backupIgnoreConfig[localBookKey] == true
     val backupIgnoreManga: Boolean
         get() = backupIgnoreConfig[mangaKey] == true
+
+    /** SPEC-271: 恢复时跳过浏览器收藏/历史。 */
+    val ignoreBrowserBrowse: Boolean
+        get() = ignoreConfig[browserBrowseKey] == true
+
+    /** SPEC-271: 备份时跳过浏览器收藏/历史。 */
+    val backupIgnoreBrowserBrowse: Boolean
+        get() = backupIgnoreConfig[browserBrowseKey] == true
 
     fun saveIgnoreConfig() {
         val json = GSON.toJson(ignoreConfig)

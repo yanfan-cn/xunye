@@ -11,6 +11,8 @@ import io.legado.app.BuildConfig
 import io.legado.app.R
 import io.legado.app.constant.AppLog
 import io.legado.app.constant.PreferKey
+import io.legado.app.browser.engine.BrowseStore
+import io.legado.app.browser.engine.BrowseStoreBackup
 import io.legado.app.data.appDb
 import io.legado.app.data.entities.Book
 import io.legado.app.data.entities.BookGroup
@@ -372,6 +374,22 @@ object Restore : KoinComponent {
                     ConfigUpdateAction.RebuildWholeBookPageIndex,
                 )
             )
+        }
+        // SPEC-271: 浏览器收藏 / 文件夹 / 历史——合并而非覆盖。
+        if (!BackupConfig.ignoreBrowserBrowse) {
+            runCatching {
+                val file = File(path, BrowseStoreBackup.FILE_NAME)
+                if (file.isFile) {
+                    val remote = BrowseStoreBackup.read(file)
+                    if (remote != null) {
+                        val store = BrowseStore(appCtx)
+                        val merged = BrowseStoreBackup.merge(local = store.snapshot(), remote = remote)
+                        store.applySnapshot(merged.snapshot)
+                    }
+                }
+            }.onFailure {
+                AppLog.put("恢复浏览器收藏/历史出错\n${it.localizedMessage}", it)
+            }
         }
         // 恢复配置文件 (手动解析 XML，替代反射逻辑)
         val configFile = File(path, "config.xml")

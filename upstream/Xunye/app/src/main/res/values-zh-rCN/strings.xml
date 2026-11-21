@@ -534,6 +534,8 @@
     <string name="finish_book">完结书籍</string>
     <string name="local_book">本地书籍</string>
     <string name="manga_config">漫画设置</string>
+    <!-- SPEC-271: 备份/恢复忽略项 -->
+    <string name="browser_browse_backup">浏览器收藏与历史</string>
     <string name="status_bar_immersion">状态栏颜色透明</string>
     <string name="imm_navigation_bar">沉浸式导航栏</string>
     <string name="imm_navigation_bar_s">导航栏颜色透明</string>

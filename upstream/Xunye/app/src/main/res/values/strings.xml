@@ -564,6 +564,8 @@
     <string name="finish_book">Finished books</string>
     <string name="local_book">Local Books</string>
     <string name="manga_config">Manga Settings</string>
+    <!-- SPEC-271: 备份/恢复忽略项 -->
+    <string name="browser_browse_backup">Browser bookmarks and history</string>
     <string name="status_bar_immersion">The status bar color becomes transparent</string>
     <string name="imm_navigation_bar">immersion navigation bar</string>
     <string name="imm_navigation_bar_s">The navigation bar becomes transparent</string>

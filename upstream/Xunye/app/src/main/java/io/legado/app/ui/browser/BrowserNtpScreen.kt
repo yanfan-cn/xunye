@@ -89,7 +89,7 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
@@ -122,6 +122,7 @@ import io.legado.app.browser.engine.BrowseStore
 import io.legado.app.browser.engine.BrowserChromePrefs
 import io.legado.app.browser.engine.NtpCapsuleInk
 import io.legado.app.browser.engine.NtpWallpaperIds
+import io.legado.app.browser.engine.NtpWallpaperPalette
 import io.legado.app.browser.engine.NtpWallpaperStore
 import io.legado.app.browser.engine.BrowserNtpNews
 import io.legado.app.browser.engine.BrowserNtpPrefs
@@ -886,21 +887,26 @@ fun BrowserNtpScreen(
             }
 
             // SPEC-049/161: dual-row capsule — same colors in incognito.
-            // SPEC-269: 胶囊内墨色跟胶囊底，不跟壁纸；赛博/霓虹浅玻璃用深色字（纠正 SPEC-265）。
+            // SPEC-270: 胶囊内墨色由**胶囊实际可见底色**决定（填色 × 玻璃透明度 × 背景壁纸），
+            // 不再「深色预置壁纸 ⇒ 深字」；对比不足时自动给胶囊补垫色。
             val fieldBg = colors.fieldBg
-            val useDarkCapsuleInk = NtpCapsuleInk.useDarkInk(
-                fieldBgLuminance = fieldBg.luminance(),
-                darkPresetWallpaper = darkPresetVisible,
-            )
-            val textColor = if (useDarkCapsuleInk) NtpDarkWordmark else Color.White
-            val secondary = if (useDarkCapsuleInk) {
-                NtpDarkWordmark.copy(alpha = 0.62f)
-            } else {
-                Color.White.copy(alpha = 0.88f)
-            }
-            val capsuleShape = RoundedCornerShape(28.dp)
             // SPEC-072: liquid glass 0.4/0.35; filled = 1.
             val capsuleFill = ntpGlassOverlayAlpha()
+            val capsuleBackgroundArgb = NtpWallpaperPalette.backgroundArgb(
+                wallpaperId = wallpaperId,
+                scrimAlpha = wallpaperScrim,
+                pageBg = pageBg.toArgb(),
+                noWallpaper = !(dailyWallpaperVisible || presetWallpaperVisible),
+            )
+            val capsuleInk = NtpCapsuleInk.decide(
+                capsuleFill = fieldBg.toArgb(),
+                fillAlpha = capsuleFill,
+                background = capsuleBackgroundArgb,
+            )
+            val capsuleInkColor = Color(capsuleInk.inkArgb)
+            val textColor = capsuleInkColor
+            val secondary = capsuleInkColor.copy(alpha = capsuleInk.effectiveSecondaryAlpha)
+            val capsuleShape = RoundedCornerShape(28.dp)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -914,7 +920,8 @@ fun BrowserNtpScreen(
                     }
                     .clip(capsuleShape)
                     .browserControlLiquidGlass(capsuleShape, interactive = false, showShadow = false)
-                    .background(fieldBg.copy(alpha = capsuleFill)),
+                    .background(fieldBg.copy(alpha = capsuleFill))
+                    .background(Color(capsuleInk.scrimArgb).copy(alpha = capsuleInk.scrimAlpha)),
             ) {
                 Row(
                     modifier = Modifier

@@ -6,6 +6,8 @@ import androidx.core.net.toUri
 import androidx.documentfile.provider.DocumentFile
 import io.legado.app.constant.AppLog
 import io.legado.app.constant.PreferKey
+import io.legado.app.browser.engine.BrowseStore
+import io.legado.app.browser.engine.BrowseStoreBackup
 import io.legado.app.data.appDb
 import io.legado.app.domain.gateway.BackupSettingsGateway
 import io.legado.app.domain.gateway.ReadStyleGateway
@@ -93,6 +95,8 @@ object Backup {
             ReadBookConfig.shareConfigFileName,
             ThemeConfigStore.configFileName,
             BookCover.configFileName,
+            // SPEC-271: 浏览器收藏（网页书签）/文件夹/浏览历史。
+            BrowseStoreBackup.FILE_NAME,
             "config.xml"
         )
     }
@@ -250,6 +254,17 @@ object Backup {
             }
         }
         currentCoroutineContext().ensureActive()
+        // SPEC-271: 浏览器收藏 / 文件夹 / 历史（独立 SP，原先完全不在备份内）。
+        if (!BackupConfig.backupIgnoreBrowserBrowse) {
+            runCatching {
+                BrowseStoreBackup.write(
+                    File(backupPath, BrowseStoreBackup.FILE_NAME),
+                    BrowseStore(appCtx).snapshot(),
+                )
+            }.onFailure {
+                AppLog.put("备份浏览器收藏/历史出错\n${it.localizedMessage}", it)
+            }
+        }
         val configMap = AppConfigStore.preferences.asMap()
             .mapKeys { it.key.name }
         val xmlBuilder = StringBuilder()
